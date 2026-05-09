@@ -1,20 +1,66 @@
-# RadioRocketV2 📡🚀
+# lora-rocket-telemetry 📡🚀
 
-RadioRocketV2 is an open-source project designed around the configuration and integration of amateur radio systems using modern digital tools into mid and high power model rockets. Built by N3VEM, with contributions from the community, this project empowers ham radio and rocket enthusiasts to combine their interest. 
+Amateur radio telemetry system for mid-power model rocketry. Combines a Feather M0 + LoRa rocket sled with a LePotato SBC ground station that doubles as a portable APRS digipeater for remote launch sites.
 
-This repository is based of the N3VEM version 2 of the radio rocket, code named Odori. 
+Forked and substantially rewritten from [N3VEM/RadioRocketV2](https://github.com/N3VEM/RadioRocketV2). Original concept by Vance Martin (N3VEM). Rewritten for the Feather M0 platform by Francisco Velez (KC3ZTQ).
 
-This repository contains information related to version 2 of the [radio rocket project.](https://n3vem.com/rocket)
+## System Overview
 
-More specific details can be found in the readme within each folder, for the various components of the rocket and base station.
+```
+[ Rocket: Feather M0 TX sled ]
+    BMP390 + ADXL375
+    Launch/apogee detection
+    1 Hz LoRa telemetry @ 434 MHz
+           |
+           | LoRa (434 MHz)
+           ↓
+[ Ground Station: LePotato SBC ]
+    Feather M0 RFM95 — LoRa RX
+    RTL-SDR — APRS RX / digipeater (144.39 MHz)
+    Direwolf software TNC
+    Node-RED telemetry dashboard
+```
 
-Please note that this repository isn't step-by-step directions. However, KC3ZTQ has updated the documentation to make it easier to follow along. If you are wanting to replicate this project, and have any questions, please feel free to reach out to N3VEM or KC3ZTQ. 
+## Repository Structure
 
-## APRS in the Rocket
-APRS tracking is used in the rocket primarily for position data, mapping, and tracking. Track how high your rocket went, and how far away it's packets were received. The APRS sled can be done stand-alone without the rest of the project, if you simply want to beacon packets, and then check aprs.fi for data. Building the APRS tracker only would rely on their being at least 1 I-Gate within range of your launch site.
+| Folder | Contents |
+|--------|----------|
+| [`RocketLoRaTelemetry/`](RocketLoRaTelemetry/) | Feather M0 TX + RX firmware, build photos |
+| [`GroundStation/`](GroundStation/) | LePotato APRS digipeater build + Node-RED flows |
 
-## LoRa & Telemetry in the Rocket
-The rocket uses 70cm LoRa to send telemetry packets, relay messages, and respond to commands.
+## Hardware
 
-## Ground Station
-The ground station is a single board computer, LoRa feather module, SDRplay Dongle, and all the associated wiring and power components, built into a project enclosure. It's primary purpose is to receive the LoRa and APRS data, and then act as a server to serve up that data via node-red and and a networked sound modem so that it can be displayed in a web browser and APRS client running on any other network connected device (a laptop, tablet, etc.)
+### TX Sled (rocket)
+- Adafruit Feather M0 + RFM95 (434 MHz)
+- Adafruit BMP390 — barometric altitude
+- Adafruit ADXL375 — high-G accelerometer (±200 g)
+- LiPo battery
+
+### RX Ground Station
+- Libre Computer LePotato SBC
+- Adafruit Feather M0 + RFM95 (434 MHz) — LoRa receive
+- RTL-SDR V4 dongle — APRS receive / digipeater
+- Custom blue acrylic enclosure with panel-mount connectors
+
+## Firmware Features
+
+- **Ground pressure calibration** — 50-sample average at boot for stable altitude reference
+- **Launch detection** — 3-axis vector magnitude threshold
+- **Apogee detection** — barometric pressure reversal
+- **1 Hz telemetry with ACK** — compact packet: altitude, max alt, G-force, peak G, temp, battery, flight state
+- **Battery monitoring** — voltage divider on A7 with Good / Low / Charge Now thresholds
+
+## Status
+
+✅ Flight tested — telemetry received successfully on first flight.
+
+APRS integration planned (QRPLabs LightAPRS 2.0 tracker). Ground station digipeater infrastructure is ready.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Attribution
+
+Based on [RadioRocketV2](https://github.com/N3VEM/RadioRocketV2) by Vance Martin (N3VEM).
+Rewritten for Feather M0 by Francisco Velez (KC3ZTQ).

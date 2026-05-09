@@ -1,6 +1,6 @@
 # lora-rocket-telemetry 📡🚀
 
-Amateur radio telemetry system for mid-power model rocketry. Combines a Feather M0 + LoRa rocket sled with a LePotato SBC ground station that doubles as a portable APRS digipeater for remote launch sites.
+Amateur radio telemetry system for mid- and high-power model rocketry. Combines a Feather M0 + LoRa rocket sled with a LePotato SBC ground station that doubles as a portable APRS digipeater for remote launch sites. Streams altitude, G-force, and flight state to the ground in real time at 1 Hz — not post-flight, while it's happening.
 
 Forked and substantially rewritten from [N3VEM/RadioRocketV2](https://github.com/N3VEM/RadioRocketV2). Original concept by Vance Martin (N3VEM). Rewritten for the Feather M0 platform by Francisco Velez (KC3ZTQ).
 
@@ -47,12 +47,14 @@ Forked and substantially rewritten from [N3VEM/RadioRocketV2](https://github.com
 - **Ground pressure calibration** — 50-sample average at boot for stable altitude reference
 - **Launch detection** — 3-axis vector magnitude threshold
 - **Apogee detection** — barometric pressure reversal
-- **1 Hz telemetry with ACK** — compact packet: altitude, max alt, G-force, peak G, temp, battery, flight state
+- **1 Hz real-time telemetry with ACK** — compact packet: altitude, max alt, G-force, peak G, temp, battery, flight state
 - **Battery monitoring** — voltage divider on A7 with Good / Low / Charge Now thresholds
 
 ## Status
 
 ✅ Flight tested — telemetry received successfully on first flight.
+
+🔧 High-power deployment in progress — Apogee Zephyr nose cone e-bay built, NAR Level 1 certified.
 
 APRS integration planned (QRPLabs LightAPRS 2.0 tracker). Ground station digipeater infrastructure is ready.
 

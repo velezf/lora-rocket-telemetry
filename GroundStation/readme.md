@@ -4,7 +4,7 @@ Mobile APRS digipeater and LoRa telemetry receiver for rocket launches at remote
 
 ## Purpose
 
-Most mid-power launch sites are outside range of any APRS digipeater or I-Gate. This ground station solves that by bringing the infrastructure to the field — a self-contained LePotato SBC running Direwolf as a software TNC and digipeater, paired with an RTL-SDR dongle for APRS receive and a Feather M0 for LoRa telemetry.
+Most High-power launch sites are outside range of any APRS digipeater or I-Gate. This ground station solves that by bringing the infrastructure to the field — a self-contained LePotato SBC running Direwolf as a software TNC and digipeater, paired with an RTL-SDR dongle for APRS receive and a Feather M0 for LoRa telemetry.
 
 When the rocket eventually carries an APRS tracker (planned: QRPLabs LightAPRS 2.0), this station will digipeat its packets so they reach the APRS network even from a remote field.
 

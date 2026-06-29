@@ -1,4 +1,17 @@
 
+## Running tests
+
+Host-logic unit tests run on the native (host) toolchain:
+
+    pio test -e native
+
+A bare `pio test` is intentionally a no-op: default_envs is pinned to the board
+(so `pio run` / upload target the hardware), and the board env ignores all tests
+via `test_ignore = *` — which also guarantees host tests are never cross-compiled
+to the SAMD target.
+
+---
+
 This directory is intended for PlatformIO Test Runner and project tests.
 
 Unit Testing is a software testing method by which individual units of

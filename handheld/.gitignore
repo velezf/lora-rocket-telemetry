@@ -1,0 +1,4 @@
+# uv-managed virtualenv and Python caches — recreated with `uv sync`
+.venv/
+__pycache__/
+*.py[cod]

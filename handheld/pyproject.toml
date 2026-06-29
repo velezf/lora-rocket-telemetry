@@ -1,0 +1,14 @@
+[project]
+name = "radio"
+version = "0.1.0"
+description = "Kids' handheld LoRa telemetry receiver (Epic 8) — Adafruit bonnet env"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "adafruit-blinka>=9.1.0",
+    "adafruit-circuitpython-rfm9x>=2.2.25",
+    "adafruit-circuitpython-ssd1306>=2.12.24",
+    "lgpio>=0.2.2.0",
+    "pillow>=12.2.0",
+    "rpi-lgpio>=0.6",
+]

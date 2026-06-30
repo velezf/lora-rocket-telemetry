@@ -16,15 +16,18 @@ broadcast and gets kids leaning in — altitude climbing in real time, a big
 
 It is a **receiver only**, and just one more node on the project's shared grammar:
 
-- The **v1 packet format** is the single contract for every node (locked in Epic 3.2):
+- The **v1 packet format** is the single contract for every node — the authoritative
+  spec is [`docs/adr/0001-packet-format-v1.md`](../../../docs/adr/0001-packet-format-v1.md)
+  (locked in Epic 3.2). Its canonical golden vector:
   ```
-  V:1 SYS:7 SRC:1 SEQ:42 ALT:1234ft Max:5678ft G:2.3 Pg:9.1 T:21.5C Batt:3.92V St:1 t+12s
+  V:1 SYS:7 SRC:1 SEQ:42 St:1 ALT:1234ft Max:5678ft G:2.3 Pg:9.1 T:21.5C Batt:3.92V MET:12
   ```
-  `V` version · `SYS` network · `SRC` source vehicle · `SEQ` counter · flight fields ·
-  `St` state (0 pad / 1 ascent / 2 descent). New tags are additive. The handheld
-  decodes this same string — it tracks `St` for LIFTOFF/apogee and `SRC` for the
-  multi-node view (8.3). *(The current sled firmware still emits the legacy
-  emoji-string telemetry; it migrates to v1 in Epic 3.1–3.4. The handheld targets v1.)*
+  `V` version · `SYS` network · `SRC` source vehicle · `SEQ` counter · `St` state
+  (0 pad / 1 ascent / 2 descent) · flight fields · `MET` mission-elapsed seconds.
+  New tags are additive. The handheld decodes this same string — it tracks `St` for
+  LIFTOFF/apogee and `SRC` for the multi-node view (8.3). *(The current sled firmware
+  still emits the legacy emoji-string telemetry; it migrates to v1 in Epic 3.1–3.4.
+  The handheld targets v1.)*
 - **Native-Pi RX** is already the project's RX pattern (Epic 2.5): `adafruit_rfm9x`
   at 434 MHz mirroring the sled's RadioHead modem config, SPI baud ~1 MHz, accept the
   `0xFF` broadcast address; the library strips the 4-byte RadioHead header and hands

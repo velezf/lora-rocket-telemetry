@@ -9,17 +9,24 @@ _Last updated: 2026-06-30 (Claude, on Mac + Pi 5 over SSH)._
 
 Foundations are down. Epic 1 (Mac PlatformIO toolchain) is built and merged; the v1
 packet contract — the keystone everything downstream depends on — is **locked and
-published** as ADR 0001. The Epic 2 ground station (`apogee-gs`) is now on the network:
-OS baseline, Wi-Fi-on-boot, and Pi Connect are done; only the radio/UPS hardware tasks
-remain. Next up is the Epic 3 firmware build (all host-testable; no board needed yet).
-Epic 8 has its platform groundwork merged.
+published** as ADR 0001. The Epic 2 ground station (`apogee-gs`) is software-complete
+(2.1–2.4 + Pi Connect: on the network, remote-reachable, Claude Code authenticated,
+repo cloned); only the radio/UPS hardware tasks (2.5/2.6) remain. Next up is the Epic 3
+firmware build (all host-testable; no board needed yet). Epic 8 has its platform
+groundwork merged.
 
 ## Ground station (`apogee-gs`) — access
 
 - **SSH:** `ssh rocketman@apogee-gs.local` (key auth, passwordless sudo).
 - **Pi Connect:** signed in as device `apogee-gs` (`rpi-connect-lite`, remote shell;
   no screen sharing — headless). Reachable from anywhere, not just the local network.
-- **OS:** Raspberry Pi OS 64-bit, **Trixie / Debian 13** (not Bookworm). Python 3.13.
+- **Claude Code:** installed (`2.1.197`), on PATH (`~/.local/bin`), **authenticated** via
+  `claude auth login` (claude.ai, Max). Headless `claude -p` works.
+- **OS:** Raspberry Pi OS 64-bit, **Trixie / Debian 13** (not Bookworm). **Python 3.13.5**
+  (`/usr/bin/python3`), `venv` works. No system `pip` (PEP 668 externally-managed — use
+  venv/uv); **`uv` not yet installed** (wanted for the Epic 4 ground service).
+- **Repo:** cloned at `~/lora-rocket-telemetry` via a **read-only deploy key**
+  (`apogee-gs`); `git pull` works.
 - **Wi-Fi:** home **WideRoad** (priority 0) first, **iPhone 17 hotspot** fallback
   (priority −10, infinite retry, persistent NM keyfile). Networking is netplan-rendered
   → NetworkManager. _(Hotspot secret lives only on the Pi, never in this repo.)_
@@ -29,7 +36,7 @@ Epic 8 has its platform groundwork merged.
 | Epic | Status |
 |------|--------|
 | 1 — PlatformIO dev env (Mac) | ✅ **Done & published** (1.1–1.3). 1.4 upload smoke **deferred — hardware-gated** (no Feather M0). |
-| 2 — Pi 5 ground-station bring-up | 🟡 **2.1 + 2.2 done** (OS baseline, updates, EEPROM, headless SSH, I²C+SPI enabled; Wi-Fi home→hotspot, cold-boot rejoin verified) **+ Pi Connect**. **2.3 Claude Code** and **2.4 git deploy key** deferred. **2.5 radio RX / 2.6 PiSugar** hardware-blocked. Hotspot fallback configured but not field-verified. |
+| 2 — Pi 5 ground-station bring-up | 🟢 **Software side done — 2.1–2.4 + Pi Connect.** OS baseline/updates/EEPROM, headless SSH, I²C+SPI, Python 3.13; Wi-Fi home→hotspot (cold-boot rejoin verified); Pi Connect; Claude Code installed + authenticated (Max); read-only deploy key + clone + pull. **Only 2.5 radio RX / 2.6 PiSugar remain — hardware-blocked.** Hotspot fallback not yet field-verified. |
 | 3 — Sled TX firmware + contract | 🟡 **Contract locked & published (ADR 0001).** Firmware build not started. |
 | 4 — Ground service (decode/log/dash/web/OLED) | ⏳ Not started. 4.1 decoder can begin against the published ADR. |
 | 5 — 9-DoF integration | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -54,9 +61,7 @@ docs are all merged to `main` and pushed. Next branch will be `feat/sled-firmwar
 
 ## Immediate next steps
 
-1. **Finish Epic 2 software tasks** on `apogee-gs`: **2.3** Claude Code (native installer)
-   and **2.4** GitHub pull path (generate an SSH deploy key on the Pi, add it to the repo,
-   clone). Both quick; no hardware needed.
+1. (Optional) Install **`uv`** on `apogee-gs` for the Epic 4 ground-service Python env.
 2. Start **`feat/sled-firmware-v1`** for Epic 3, RED→GREEN per task, in dependency order:
    3.7 conversions → 3.5 launch → 3.6 apogee → 3.4 `St`+`SEQ` → 3.3 `SYS`/`SRC` →
    3.2 packet encoder (asserts ADR golden vector) → 3.1a port to `src/` (compile-only,

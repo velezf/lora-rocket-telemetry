@@ -76,7 +76,7 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 
 *Goal: the Pi 5 boots onto your phone hotspot, runs Claude Code, pulls ground-side code from GitHub, receives LoRa natively via the breakout, drives a status OLED, and runs on a battery UPS. As a real Pi, Blinka, the radio, and the PiSugar are all first-class — no Libre overlay glue.*
 
-- **2.1** — OS baseline: Raspberry Pi OS 64-bit (Bookworm), updates, headless SSH, Python 3; enable I²C + SPI via `raspi-config` (a toggle now, not a device-tree overlay)
+- **2.1** — OS baseline: Raspberry Pi OS 64-bit (Trixie / Debian 13), updates, headless SSH, Python 3; enable I²C + SPI via `raspi-config` (a toggle now, not a device-tree overlay)
 - **2.2** — WiFi-on-boot: NetworkManager autoconnect → phone hotspot (fixed SSID/password, infinite retry); verify cold-boot rejoin
 - **2.3** — Claude Code on the Pi: native installer; 8 GB is comfortable. Runs but isn't Mac-snappy — good for on-box tinkering, heavy lifting stays on the Mac
 - **2.4** — GitHub pull path: SSH deploy key, clone, `git pull` update routine for ground-side code

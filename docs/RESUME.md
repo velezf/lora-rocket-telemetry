@@ -21,18 +21,16 @@ Pi itself, and Epic 8 has its platform groundwork merged.
 | 2 — Pi 5 ground-station bring-up | 🔧 In progress on the Pi 5 (parallel session). Status not fully known on the Mac side — confirm before depending on it. |
 | 3 — Sled TX firmware + contract | 🟡 **Contract locked & published (ADR 0001).** Firmware build not started. |
 | 4 — Ground service (decode/log/dash/web/OLED) | ⏳ Not started. 4.1 decoder can begin against the published ADR. |
-| 5 — 9-DoF integration | ⏳ Not started. Tag names reserved (see ADR 0001 Appendix A, pending merge). |
+| 5 — 9-DoF integration | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
-| 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (Appendix A, pending merge). |
+| 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
 | 8 — Kids' handheld | 🟡 **8.1 platform groundwork merged** (PR #1, `handheld/`). Bench bring-up pending PiSugar 3 + SRH805S antenna (both ordered). 8.2–8.5 not started. |
 
 ## Open branches (pending review/merge)
 
-- **`docs/adr-tag-namespace`** (`8b99a15`) — ADR 0001 Appendix A: reserves tag names for
-  9-DoF + lander. **Pending Frank's review/merge.**
-- **`docs/project-memory`** (this branch) — adds `CLAUDE.md` + this file. **Pending review/merge.**
-
-`main` is at the ADR + plan merge (`7ff8c2e`), pushed to origin.
+None. The ADR/plan, the tag-namespace appendix, and the `CLAUDE.md` + `RESUME.md`
+docs are all merged to `main` and pushed. Next branch will be `feat/sled-firmware-v1`
+(Epic 3).
 
 ## Locked decisions
 
@@ -45,12 +43,11 @@ Pi itself, and Epic 8 has its platform groundwork merged.
 
 ## Immediate next steps
 
-1. Review/merge the two open docs branches above.
-2. Start **`feat/sled-firmware-v1`** for Epic 3, RED→GREEN per task, in dependency order:
+1. Start **`feat/sled-firmware-v1`** for Epic 3, RED→GREEN per task, in dependency order:
    3.7 conversions → 3.5 launch → 3.6 apogee → 3.4 `St`+`SEQ` → 3.3 `SYS`/`SRC` →
    3.2 packet encoder (asserts ADR golden vector) → 3.1a port to `src/` (compile-only,
    `pio run -e feather_m0_tx`). Each pure unit obeys the `lib/` purity rule.
-3. **Hardware day (batched, needs the Feather M0):** 1.4 upload smoke + 3.1b flash &
+2. **Hardware day (batched, needs the Feather M0):** 1.4 upload smoke + 3.1b flash &
    parity diff vs. the V1 `.ino`.
 
 ## Hardware gating

@@ -120,3 +120,43 @@ version bump** — itself a demonstration of the keyed, additive model below.
 The 3.2 C encoder, the 4.1 Python decoder, 4.3 logging / loss stats (`SEQ`, `SRC`),
 4.4 / 4.6 dashboard + OLED, the 8.x handheld parser, and the Epic 7 lander — all
 implement this table.
+
+## Appendix A — Reserved & anticipated tags (non-normative)
+
+This appendix reserves tag **names** ahead of the epics that will define them, to
+prevent cross-node collisions. It is **non-normative**: units, precision, and exact
+semantics are deliberately left TBD and become normative rows in the v1 field-spec
+table when their epic lands — each an **additive, no-bump change** per the versioning
+policy above. Reserving names now costs nothing and forecloses the one change that
+*would* force a version bump: a name clash.
+
+### Naming rules
+
+- **The 12 v1 tags above are reserved globally** (`V SYS SRC SEQ St ALT Max G Pg T
+  Batt MET`). No new tag may reuse one of these names for a different meaning.
+- **Shared physical quantities reuse the existing tag, disambiguated by `SRC`.** The
+  lander's temperature and battery are just `T` and `Batt` on `SRC:2` — same tags as
+  the sled on `SRC:1`. Do not mint a second name for the same quantity.
+- **`G` is G-force.** It must NOT be reused — in particular the APDS9960 green channel
+  is **not** `G` (it is `Grn`, below). This is the concrete collision this appendix
+  exists to prevent.
+- **Prefer multi-character names for new quantities.** Single letters collide easily;
+  the v1 set already spent most of them.
+
+### Anticipated tags
+
+| Candidate | Epic | SRC | Quantity | Units (TBD) | Notes |
+|-----------|------|-----|----------|-------------|-------|
+| `Roll` | 5.3 | 1 | roll rate | deg/s? | from 9-DoF fusion (LSM6DSOX/LIS3MDL); plan's example name |
+| `Spin` | 5.3 | 1 | angle off vertical | deg? | plan's example name; maps to 5.2 "angle-off-vertical" — name/semantics to finalize in 5.3 |
+| `T` | 7.3 | 2 | lander temperature | °C | **reuse** of v1 `T`, disambiguated by `SRC:2` (BME680) |
+| `RH` | 7.3 | 2 | relative humidity | % | BME680 |
+| `P` | 7.3 | 2 | barometric pressure | hPa? | BME680; lander may send raw pressure where the sled sends derived `ALT` |
+| `Gas` | 7.3 | 2 | VOC / gas resistance | Ω or index? | BME680; raw-Ω vs. IAQ-index TBD |
+| `Lux` | 7.3 | 2 | ambient light | lux / clear-count? | APDS9960 |
+| `Rd` `Grn` `Blu` | 7.3 | 2 | color channels | counts? | APDS9960; **`Grn`, never `G`** |
+| `Batt` | 7.3 | 2 | lander battery | V | **reuse** of v1 `Batt`, disambiguated by `SRC:2` |
+
+Candidate names are front-runners, not commitments; the owning epic finalizes the
+name, units, and precision when it adds the normative row. The reservations that ARE
+firm are the *rules* above — especially that `G`, and every other v1 tag, is taken.

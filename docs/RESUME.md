@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-06-30 (Claude, on Mac + Pi 5 over SSH)._
+_Last updated: 2026-07-07 (Claude, on Mac + Pi 5 over SSH)._
 
 ## Where we are
 
@@ -11,7 +11,10 @@ Foundations are down. Epic 1 (Mac PlatformIO toolchain) is built and merged; the
 packet contract — the keystone everything downstream depends on — is **locked and
 published** as ADR 0001. The Epic 2 ground station (`apogee-gs`) is software-complete
 (2.1–2.4 + Pi Connect: on the network, remote-reachable, Claude Code authenticated,
-repo cloned); only the radio/UPS hardware tasks (2.5/2.6) remain. Next up is the Epic 3
+repo cloned). The 2.5/2.6 **peripheral hardware is now wired and bench-verified**
+(radio on SPI0 **CE1** → RegVersion `0x12`, OLED at I²C `0x3d`, PiSugar battery `0x57`
++ RTC `0x68`, plus six front-panel LEDs); **live RX from the V1 sled confirmed**. Only
+the radio **RX software** env (2.5) remains. Next up is the Epic 3
 firmware build (all host-testable; no board needed yet). Epic 8 has its platform
 groundwork merged.
 
@@ -31,12 +34,29 @@ groundwork merged.
   (priority −10, infinite retry, persistent NM keyfile). Networking is netplan-rendered
   → NetworkManager. _(Hotspot secret lives only on the Pi, never in this repo.)_
 
+## Wired peripherals (bench-verified 2026-07-07)
+
+| Device | Bus | Address / CS | Notes |
+|--------|-----|--------------|-------|
+| RFM96 LoRa radio | SPI0 | **CE1** (`/dev/spidev0.1`, pin 26); RESET GPIO25 (pin 22) | `RegVersion 0x12`. Use `CS=board.CE1`, `RESET=board.D25`. **Not CE0** (originally doc'd as CE0; wire is on CE1). |
+| OLED (Adafruit 938, SSD1306 128×64) | I²C-1 | `0x3d` | driven via `~/gs-venv` + **`luma.oled`** |
+| PiSugar 3 Plus UPS | I²C-1 | `0x57` batt, `0x68` RTC | `pisugar-server`; `get battery` on TCP :8423 |
+| Front-panel LEDs ×6 | GPIO | `5,6,13,26,12,16` (L→R: grn×3, red, blu×2) | active-high; bring-up via `ground/tools/led_check.py` |
+
+OLED software lives in `~/gs-venv` (venv) using **`luma.oled`**. Adafruit **Blinka was skipped**:
+its `RPi.GPIO`/`rpi_ws281x` wheels won't build on Pi 5 without `python3-dev`, and RPi.GPIO
+doesn't run on BCM2712 anyway — revisit only if Epic 4.6 wants to reuse the handheld's
+adafruit rendering. `rocketman` is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`.
+
+**Authoritative pin map:** [`docs/ground-station-wiring.md`](ground-station-wiring.md) — radio,
+OLED, and the corrected front-panel LED harness map (the harness was cross-wired L3–L6).
+
 ## Epic status
 
 | Epic | Status |
 |------|--------|
 | 1 — PlatformIO dev env (Mac) | ✅ **Done & published** (1.1–1.3). 1.4 upload smoke **deferred — hardware-gated** (no Feather M0). |
-| 2 — Pi 5 ground-station bring-up | 🟢 **Software side done — 2.1–2.4 + Pi Connect.** OS baseline/updates/EEPROM, headless SSH, I²C+SPI, Python 3.13; Wi-Fi home→hotspot (cold-boot rejoin verified); Pi Connect; Claude Code installed + authenticated (Max); read-only deploy key + clone + pull. **Only 2.5 radio RX / 2.6 PiSugar remain — hardware-blocked.** Hotspot fallback not yet field-verified. |
+| 2 — Pi 5 ground-station bring-up | 🟢 **Software side done + peripheral HW wired & bench-verified.** 2.1–2.4 + Pi Connect (OS baseline, headless SSH, I²C+SPI, Python 3.13, Wi-Fi home→hotspot, Claude Code auth, deploy-key clone). **2.5/2.6 hardware verified 2026-07-07:** RFM96 on **SPI0 CE1** (RegVersion 0x12), OLED I²C **0x3d**, PiSugar battery **0x57** + RTC **0x68** (~84%); OLED text confirmed; **6 front-panel LEDs mapped & verified** (harness was cross-wired L3–L6 — corrected map in [`ground-station-wiring.md`](ground-station-wiring.md)); **live RX from the V1 sled confirmed**. LED *functions* not yet assigned (Epic 4). **Remaining: 2.5 radio-RX software; hotspot fallback field test.** |
 | 3 — Sled TX firmware + contract | 🟡 **Contract locked & published (ADR 0001).** Firmware build not started. |
 | 4 — Ground service (decode/log/dash/web/OLED) | ⏳ Not started. 4.1 decoder can begin against the published ADR. |
 | 5 — 9-DoF integration | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -46,9 +66,10 @@ groundwork merged.
 
 ## Open branches (pending review/merge)
 
-None. The ADR/plan, the tag-namespace appendix, and the `CLAUDE.md` + `RESUME.md`
-docs are all merged to `main` and pushed. Next branch will be `feat/sled-firmware-v1`
-(Epic 3).
+**`feat/gs-bringup`** (Epic 2.5/2.6) — pushed to origin, **awaiting review/merge**. Commits:
+`docs(ground-station): add wiring reference + LED bring-up tool` and
+`docs(resume): Epic 2.5/2.6 hardware wired & bench-verified`. After it merges, the next
+branch is `feat/sled-firmware-v1` (Epic 3).
 
 ## Locked decisions
 
@@ -61,7 +82,9 @@ docs are all merged to `main` and pushed. Next branch will be `feat/sled-firmwar
 
 ## Immediate next steps
 
-1. (Optional) Install **`uv`** on `apogee-gs` for the Epic 4 ground-service Python env.
+1. Build the **2.5 radio-RX software** in `~/gs-venv`: add `adafruit-circuitpython-rfm9x`
+   (I²C OLED already works via `luma.oled`); wire a live RX read with `CS=CE1`, then decode
+   against ADR 0001. (`uv`/Blinka optional; Blinka needs `python3-dev` + lgpio on Pi 5.)
 2. Start **`feat/sled-firmware-v1`** for Epic 3, RED→GREEN per task, in dependency order:
    3.7 conversions → 3.5 launch → 3.6 apogee → 3.4 `St`+`SEQ` → 3.3 `SYS`/`SRC` →
    3.2 packet encoder (asserts ADR golden vector) → 3.1a port to `src/` (compile-only,

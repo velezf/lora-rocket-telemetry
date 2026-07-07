@@ -1,0 +1,18 @@
+[Unit]
+Description=Apogee ground telemetry ingest (single radio owner)
+After=network.target
+# Only one process may own the SPI radio — do not run rx_test.py etc. alongside.
+
+[Service]
+Type=simple
+User=rocketman
+WorkingDirectory=/home/rocketman/lora-rocket-telemetry
+ExecStart=/usr/bin/python3 -m ground.ingest.service
+Restart=on-failure
+RestartSec=3
+# Clean shutdown: SIGTERM -> service writes service_stop + drains the log queue.
+KillSignal=SIGTERM
+TimeoutStopSec=6
+
+[Install]
+WantedBy=multi-user.target

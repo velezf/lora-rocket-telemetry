@@ -60,6 +60,13 @@ class TestAdditiveExtension(unittest.TestCase):
         self.assertEqual(r.fields["SRC"], 2)
         self.assertNotIn("ALT", r.fields)                # absent is valid, not an error
 
+    def test_callsign_tag_surfaced_as_unknown(self):
+        # Part-97 station ID: CALL rides the additive/unknown-tag path
+        r = decode(GOLDEN + b" CALL:KC3ZTQ")
+        self.assertIsInstance(r, DecodedPacket)
+        self.assertEqual(r.unknown["CALL"], "KC3ZTQ")
+        self.assertEqual(r.fields["SEQ"], 42)            # known fields still decoded
+
 
 class TestErrors(unittest.TestCase):
     def _err(self, payload, reason):

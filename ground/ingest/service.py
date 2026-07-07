@@ -36,11 +36,13 @@ def now_iso() -> str:
 
 
 def load_config() -> dict:
-    cfg = {"allowed_sys": [7], "known_src": [1, 2]}
+    cfg = {"allowed_sys": [7], "known_src": [1, 2], "callsign_binding": {}}
     try:
         cfg.update(json.loads(CONFIG_PATH.read_text()))
     except FileNotFoundError:
         pass
+    # JSON object keys are strings; the CALL<->SYS binding is keyed by int SYS.
+    cfg["callsign_binding"] = {int(k): v for k, v in cfg.get("callsign_binding", {}).items()}
     return cfg
 
 
@@ -79,7 +81,8 @@ def main() -> None:
     stats = LinkStats()
     registry = ObserverRegistry()
     core = IngestCore(writer.sink, stats, registry,
-                      allowed_sys=cfg["allowed_sys"], known_src=cfg["known_src"])
+                      allowed_sys=cfg["allowed_sys"], known_src=cfg["known_src"],
+                      callsign_binding=cfg["callsign_binding"])
 
     writer.sink(to_jsonl(event_record(now_iso(), "service_start", session=session, config=cfg)))
     print(f"[ingest] {DATA_DIR / session}  allowed_sys={cfg['allowed_sys']} known_src={cfg['known_src']}", flush=True)

@@ -119,5 +119,56 @@ class TestForeignTraffic(unittest.TestCase):
         self.assertEqual(len(self.dispatched), 1)
 
 
+class TestCallsignId(unittest.TestCase):
+    def setUp(self):
+        self.lines = []
+        self.stats = LinkStats()
+        self.reg = ObserverRegistry()
+        self.dispatched = []
+        self.reg.register(self.dispatched.append)
+
+    def _core(self, binding=None):
+        return IngestCore(self.lines.append, self.stats, self.reg, callsign_binding=binding)
+
+    def _events(self):
+        return [json.loads(x) for x in self.lines if json.loads(x).get("type") == "event"]
+
+    def test_call_emits_advisory_id_event(self):
+        core = self._core()
+        core.handle(-56, GOLDEN + b" CALL:KC3ZTQ", "t")
+        self.assertEqual(core.decoded, 1)                # still an accepted packet
+        self.assertIn((7, 1), self.stats.snapshot())
+        ids = [e for e in self._events() if e["event"] == "id"]
+        self.assertEqual(len(ids), 1)
+        self.assertEqual(ids[0]["callsign"], "KC3ZTQ")
+        self.assertEqual((ids[0]["sys"], ids[0]["src"]), (7, 1))
+
+    def test_no_call_no_id_event(self):
+        core = self._core()
+        core.handle(-56, GOLDEN, "t")
+        self.assertEqual([e for e in self._events() if e["event"] == "id"], [])
+
+    def test_binding_match_no_mismatch(self):
+        core = self._core(binding={7: "KC3ZTQ"})
+        core.handle(-56, GOLDEN + b" CALL:KC3ZTQ", "t")
+        self.assertEqual(core.id_mismatches, {})
+        self.assertEqual([e for e in self._events() if e["event"] == "id_mismatch"], [])
+
+    def test_binding_mismatch_flagged(self):
+        core = self._core(binding={7: "KC3ZTQ"})
+        core.handle(-56, GOLDEN + b" CALL:W1AW", "t")
+        self.assertEqual(core.id_mismatches.get((7, "W1AW")), 1)
+        mm = [e for e in self._events() if e["event"] == "id_mismatch"]
+        self.assertEqual(len(mm), 1)
+        self.assertEqual((mm[0]["callsign"], mm[0]["expected"]), ("W1AW", "KC3ZTQ"))
+
+    def test_foreign_sys_call_recorded_in_counter(self):
+        core = self._core()
+        core.handle(-70, b"V:1 SYS:9 SRC:1 SEQ:1 ALT:0ft CALL:N0CALL", "t")
+        self.assertEqual(core.foreign.get(9), 1)
+        self.assertIn("N0CALL", core.foreign_calls.get(9, set()))
+        self.assertEqual(self.stats.snapshot(), {})      # still never into stats
+
+
 if __name__ == "__main__":
     unittest.main()

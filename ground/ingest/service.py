@@ -25,6 +25,7 @@ from ground.rx.transport import SpidevLgpioTransport
 from ground.linkstats.linkstats import LinkStats
 from ground.ingest.registry import ObserverRegistry
 from ground.ingest.core import IngestCore
+from ground.flights.live import LiveFlights
 from ground.sessionlog.records import event_record, to_jsonl
 
 DATA_DIR = Path(os.environ.get("APOGEE_DATA", str(Path.home() / "apogee-data")))
@@ -36,7 +37,7 @@ def now_iso() -> str:
 
 
 def load_config() -> dict:
-    cfg = {"allowed_sys": [7], "known_src": [1, 2], "callsign_binding": {}}
+    cfg = {"allowed_sys": [7], "known_src": [1, 2], "callsign_binding": {}, "silence_timeout_s": 90}
     try:
         cfg.update(json.loads(CONFIG_PATH.read_text()))
     except FileNotFoundError:
@@ -83,6 +84,9 @@ def main() -> None:
     core = IngestCore(writer.sink, stats, registry,
                       allowed_sys=cfg["allowed_sys"], known_src=cfg["known_src"],
                       callsign_binding=cfg["callsign_binding"])
+    live = LiveFlights(writer.sink, DATA_DIR / "flights-snapshot.json",
+                       silence_timeout_s=cfg["silence_timeout_s"])
+    registry.register(live.on_observation)
 
     writer.sink(to_jsonl(event_record(now_iso(), "service_start", session=session, config=cfg)))
     print(f"[ingest] {DATA_DIR / session}  allowed_sys={cfg['allowed_sys']} known_src={cfg['known_src']}", flush=True)
@@ -97,14 +101,18 @@ def main() -> None:
 
     try:
         while not stop.is_set():
+            now = now_iso()                      # stamp time once per iteration (injected)
             frame = rx.receive()
             if frame:
-                core.handle(frame.rssi_dbm, frame.payload, now_iso())
+                core.handle(frame.rssi_dbm, frame.payload, now)
             else:
                 time.sleep(0.02)
+            live.tick(now)                       # cheap silence sweep between polls; never blocks RX
     finally:
+        now = now_iso()
+        live.tick(now)                           # final sweep; still-open flights left OPEN (rebuild resolves)
         writer.sink(to_jsonl(event_record(
-            now_iso(), "service_stop",
+            now, "service_stop",
             decoded=core.decoded, errors=core.errors, foreign=core.foreign,
             anomalies={f"{k[0]}:{k[1]}": v for k, v in core.anomalies.items()})))
         writer.shutdown()

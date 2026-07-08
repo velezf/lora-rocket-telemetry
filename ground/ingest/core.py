@@ -15,8 +15,14 @@ Foreign-traffic policy (addendum A):
 SYS allowlist / known-SRC set are FIELD CONFIG (loaded by the service), not repo
 constants — hence constructor params.
 """
+from collections import namedtuple
+
 from ground.decode.v1 import decode, DecodedPacket
 from ground.sessionlog.records import packet_record, event_record, to_jsonl
+
+# What consumers receive on the registry: the decoded packet plus the injected
+# receive timestamp and RSSI (so live-flights / OLED / dashboard never read a clock).
+Observation = namedtuple("Observation", "received_at rssi packet")
 
 
 class IngestCore:
@@ -69,7 +75,7 @@ class IngestCore:
         self._sink(to_jsonl(packet_record(received_at, rssi, d)))
         if "SEQ" in f:
             self._stats.update(sys, src, f["SEQ"], rssi)
-        self._registry.dispatch(d)
+        self._registry.dispatch(Observation(received_at, rssi, d))
 
         if call:                                             # Part-97 ID audit trail
             self._sink(to_jsonl(event_record(received_at, "id", callsign=call, sys=sys, src=src)))

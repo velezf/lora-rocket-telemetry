@@ -52,7 +52,10 @@ class TestIngestCore(unittest.TestCase):
         self.assertIn((7, 1), snap)
         self.assertEqual(snap[(7, 1)]["rx"], 1)
         self.assertEqual(len(self.dispatched), 1)
-        self.assertEqual(self.dispatched[0].fields["SEQ"], 42)  # DecodedPacket dispatched
+        obs = self.dispatched[0]                                 # Observation(received_at, rssi, packet)
+        self.assertEqual(obs.received_at, "2026-07-07T00:00:00.000Z")
+        self.assertEqual(obs.rssi, -56)
+        self.assertEqual(obs.packet.fields["SEQ"], 42)
         self.assertEqual(self.core.decoded, 1)
 
     def test_malformed_packet_logs_raw_no_stats_no_dispatch(self):

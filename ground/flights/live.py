@@ -51,3 +51,4 @@ class LiveFlights:
                                              flight_id=fl.flight_id, src=fl.src, stats=fl.stats)))
         if closed:
             self._snapshot.write_text(flights_to_json(self._closed))
+        return closed   # so the caller can reset per-SRC display baselines (AGL)

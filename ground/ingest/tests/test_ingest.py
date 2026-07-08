@@ -26,7 +26,9 @@ class TestObserverRegistry(unittest.TestCase):
     def test_one_observer_error_does_not_break_others(self):
         r = ObserverRegistry()
         seen = []
-        r.register(lambda x: (_ for _ in ()).throw(RuntimeError("boom")))  # raises
+        def _boom(_item):
+            raise RuntimeError("boom")
+        r.register(_boom)                 # a consumer that raises
         r.register(seen.append)
         r.dispatch(7)                 # must not propagate the observer's error
         self.assertEqual(seen, [7])   # the second observer still ran

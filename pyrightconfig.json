@@ -1,0 +1,5 @@
+{
+  "extraPaths": ["."],
+  "include": ["ground"],
+  "exclude": ["**/__pycache__", "**/.pio"]
+}

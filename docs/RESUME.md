@@ -19,8 +19,10 @@ decoder → append-only JSONL session log + per-`(SYS,SRC)` link stats + foreign
 Part-97 callsign policy + **live flight detection** (advisory `flight_open`/`flight_close`
 events). Plus an offline **flights CLI** (`rebuild`/`list`/`annotate`/`close`/`open`/`export`)
 over a three-files/one-writer model (session ← service, ops journal ← CLI, index ← derivation).
-**Next: 4.4 dashboard (Flask + Chart.js) + 4.6 status OLED**, both consuming 4.2. Epic 8
-groundwork merged.
+**Field-time hardening** landed too: PiSugar RTC initialized + `auto_rtc_sync`, systemd clock
+gate, and monotonic silence/duration deltas (immune to wall-clock steps); session filenames
+are collision-proof. **Next: 4.4 dashboard (Flask + Chart.js) + 4.6 status OLED**, both
+consuming 4.2. Epic 8 groundwork merged.
 
 ## Ground station (`apogee-gs`) — access
 
@@ -106,12 +108,25 @@ branches: `feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,s
 
 ## Epic 6 firmware riders (deferred — additive; each re-runs the e2e gate)
 
-1. **SRC per-unit build config** (`-DSRC_ID` per device env) — never a shared constant; two
+1. **`St:3` = landed** — a landed flight-state code so the ground can auto-close a flight on
+   landed (today it's 90 s silence + manual only — there is no landed signal).
+2. **SRC per-unit build config** (`-DSRC_ID` per device env) — never a shared constant; two
    sleds from one repo must not both claim `SRC:1`.
-2. **±10 % TX-interval jitter** — anti-lockstep for simultaneous birds.
-3. **Part-97 station ID** — `CALL:<callsign>` at TX start / ≤9.5 min / graceful shutdown,
+3. **±10 % TX-interval jitter** — anti-lockstep for simultaneous birds.
+4. **Part-97 station ID** — `CALL:<callsign>` at TX start / ≤9.5 min / graceful shutdown,
    per-unit `-DCALLSIGN`. Ground side (decoder fixture + ingest `id` audit + CALL↔SYS
    binding) already merged; the **lander (Epic 7) inherits the ID-timer obligation.**
+5. **`BAT` battery go/no-go tag** — a derived pad-check go/no-go indicator to surface on the
+   dashboard/OLED (raw volts already ride `Batt:`; this is the launch-readiness signal).
+
+## Physical tasks (Frank — not CC)
+
+- [ ] **Overnight no-network boot** — power off overnight, boot with Wi-Fi off, confirm
+      `date` is correct (validates the PiSugar RTC + `auto_rtc_sync`).
+- [ ] **Charge the sled** — LiPo was down to **3.56 V**.
+- [ ] **Live shake test** — shake the sled (g > 3 → `St` ascent) to watch a full
+      `flight_open`→`flight_close` cycle in `~/apogee-data/session-*.jsonl`.
+- [ ] **2.2 hotspot field test** — away from home Wi-Fi, confirm fallback to the iPhone hotspot.
 
 ## Immediate next steps
 
@@ -121,15 +136,19 @@ branches: `feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,s
    peak / RSSI / SEQ-loss / flight-state per SRC. Reuse the handheld rendering.
 3. **4.5 web publish** (after the 4.3 export format settles): Quarto + pandas + Plotly
    per-flight pages → velezf.github.io.
-4. **2.2 hotspot field test** + **assign the 6 panel-LED functions** (from decoded packets).
-5. **Field/motion test:** shake the sled hard (g > 3 → St ascent) to watch a live
-   `flight_open`→`flight_close` cycle end-to-end.
+4. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
+   tests are under "Physical tasks" above.)*
 
 ## Notes / gotchas
 
 - **Standing merge gate:** the e2e check (sled TX → `ground/rx/` driver → payload matches
   the ADR fixtures) caught the newlib-nano float-printf bug that host tests could NOT —
   **keep the e2e check as a required gate for anything touching encode/decode.**
+- **Session-file retention** is unbounded today (one JSONL per service start in
+  `~/apogee-data/`; names are collision-proof). Fine for now — revisit rotation/pruning
+  only if the ground station ever runs unattended for weeks.
+- **Diagnostics:** repo carries a `pyrightconfig.json` so `ground.*` imports resolve;
+  `pyright ground/` is clean (Pi-only libs + test union-access are suppressed with reasons).
 - **newlib-nano `%f`:** float printf is off by default → the feather env carries
   `-Wl,-u,_printf_float` (float tags encode empty on-target otherwise, though host tests pass).
 - **Feather M0 re-flashing:** first upload of a session works; re-flashes reliably need a

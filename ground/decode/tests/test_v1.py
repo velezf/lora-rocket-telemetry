@@ -1,3 +1,6 @@
+# pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false, reportArgumentType=false
+# ^ tests intentionally access decode() union results after asserting the type at
+#   runtime; pyright doesn't treat unittest.assertIsInstance as a narrowing guard.
 """Host tests for the ADR-0001 v1 packet decoder.
 
 Pure Python, no radio/I-O imports — must pass on both Mac and Pi

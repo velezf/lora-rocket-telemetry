@@ -53,8 +53,8 @@ def derive_flights(session_records, ops=None, silence_timeout_s: float = 90):
 
     seg = FlightSegmenter(silence_timeout_s)
     flights = []
-    for t, _order, kind, obj in events:
-        protect = {src for src, ts in close_times.items() if any(tc >= t for tc in ts)}
+    for t, _, kind, obj in events:
+        protect = frozenset(src for src, ts in close_times.items() if any(tc >= t for tc in ts))
         flights.extend(seg.check_timeouts(t, protect))
         if kind == "packet":
             f = obj["fields"]

@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false
+# ^ receive() returns RxFrame|None; tests access it after asserting a frame arrived.
 """Host tests for the SX127x LoRa RX driver against a fake SPI transport.
 
 No spidev/lgpio and no hardware — the driver takes an injected transport, so all

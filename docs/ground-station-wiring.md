@@ -68,3 +68,23 @@ whose default pin list is in this physical order.
 - **I²C1** also carries the **PiSugar 3 Plus** UPS: `0x57` (battery) + `0x68` (RTC). No
   address conflict with the OLED (`0x3D`).
 - **SPI0** carries only the radio, on **CE1**. CE0 (`/dev/spidev0.0`) is free.
+
+## Time / clock (field hardening)
+
+There is no kernel RTC or `fake-hwclock` — the wall clock comes from NTP at home and
+the **PiSugar 3 RTC** (`0x68`) in the field. One-time setup so a network-less boot has
+the right date:
+
+```sh
+printf 'rtc_pi2rtc\n' | nc -q1 127.0.0.1 8423     # set the RTC from the (NTP-correct) clock
+# then set "auto_rtc_sync": true in /etc/pisugar-server/config.json and restart pisugar-server
+```
+
+`apogee-ingest.service` orders after `pisugar-server.service` + `time-sync.target` (the
+latter *Wants*, best-effort — it never blocks the offline field case) and has an
+`ExecStartPre` that waits up to ~30 s for a sane year, so a session is never opened under
+a bogus clock. Inside the service, **silence/duration use `time.monotonic()` deltas**
+(immune to NTP/RTC steps); the wall `received_at` is only what's recorded. **Verify:**
+power off overnight, boot with no network — `date` should be correct.
+
+The **Epic 8 handheld** (Pi Zero 2 W + PiSugar 3) replicates this same RTC config.

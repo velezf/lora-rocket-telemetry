@@ -42,7 +42,7 @@ class TestIngestCore(unittest.TestCase):
         self.core = IngestCore(sink=self.lines.append, stats=self.stats, registry=self.reg)
 
     def test_good_packet_logged_stats_dispatched(self):
-        self.core.handle(rssi=-56, payload=GOLDEN, received_at="2026-07-07T00:00:00.000Z")
+        self.core.handle(rssi=-56, payload=GOLDEN, received_at="2026-07-07T00:00:00.000Z", mono=12.5)
         self.assertEqual(len(self.lines), 1)
         rec = json.loads(self.lines[0])
         self.assertEqual(rec["type"], "packet")
@@ -52,9 +52,10 @@ class TestIngestCore(unittest.TestCase):
         self.assertIn((7, 1), snap)
         self.assertEqual(snap[(7, 1)]["rx"], 1)
         self.assertEqual(len(self.dispatched), 1)
-        obs = self.dispatched[0]                                 # Observation(received_at, rssi, packet)
+        obs = self.dispatched[0]                                 # Observation(received_at, rssi, packet, mono)
         self.assertEqual(obs.received_at, "2026-07-07T00:00:00.000Z")
         self.assertEqual(obs.rssi, -56)
+        self.assertEqual(obs.mono, 12.5)
         self.assertEqual(obs.packet.fields["SEQ"], 42)
         self.assertEqual(self.core.decoded, 1)
 

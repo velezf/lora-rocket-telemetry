@@ -1,22 +1,18 @@
 """Live flight detection — an ingest consumer that emits flight_open/flight_close
 advisory events and persists a disposable index snapshot (closed flights only).
 
-Time is INJECTED: every method takes the loop-stamped timestamp; nothing here
-reads a clock. The canonical index comes from rebuild(session, ops) — this
-snapshot is a regenerable cache, single-writer (the service). On shutdown the
-caller runs one final tick(now); any still-open flight is LEFT OPEN (not in the
-snapshot) and is resolved by the canonical rebuild against the full log.
+Time is INJECTED: every method takes the loop-stamped wall `received_at` (what gets
+RECORDED) and a `mono` monotonic value (silence/duration arithmetic) — nothing here
+reads a clock, and the silence sweep is immune to wall-clock steps (NTP/RTC jumps).
+The canonical index comes from rebuild(session, ops); this snapshot is a regenerable
+single-writer cache. On shutdown the caller runs one final tick; any still-open
+flight is LEFT OPEN (not in the snapshot) and resolved by the canonical rebuild.
 """
-from datetime import datetime
 from pathlib import Path
 
 from ground.flights.segmenter import FlightSegmenter
 from ground.flights.flights import flights_to_json
 from ground.sessionlog.records import event_record, to_jsonl
-
-
-def _epoch(iso: str) -> float:
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
 
 
 class LiveFlights:
@@ -30,19 +26,21 @@ class LiveFlights:
         return self._seg.open_srcs()
 
     def on_observation(self, obs):
-        """Registry consumer: obs = Observation(received_at, rssi, packet)."""
+        """Registry consumer: obs = Observation(received_at, rssi, packet, mono).
+        Records use the wall `received_at`; silence/duration use `mono`."""
         f = obs.packet.fields
         opened = self._seg.observe(
-            obs.received_at, _epoch(obs.received_at), f.get("SRC"), f.get("St"),
+            obs.received_at, obs.mono, f.get("SRC"), f.get("St"),
             f.get("ALT") if f.get("ALT") is not None else 0,
             obs.rssi, f.get("SEQ") if f.get("SEQ") is not None else 0)
         if opened:
             self._sink(to_jsonl(event_record(obs.received_at, "flight_open",
                                              flight_id=opened, src=f.get("SRC"))))
 
-    def tick(self, now_iso):
-        """Cheap silence sweep with an injected `now`; closes timed-out flights."""
-        closed = self._seg.check_timeouts(_epoch(now_iso))
+    def tick(self, now_iso, mono):
+        """Cheap, step-immune silence sweep: `mono` drives the timeout; `now_iso`
+        is only the wall time recorded on any flight_close event."""
+        closed = self._seg.check_timeouts(mono)
         for fl in closed:
             self._closed.append(fl)
             self._sink(to_jsonl(event_record(now_iso, "flight_close",

@@ -20,9 +20,10 @@ from collections import namedtuple
 from ground.decode.v1 import decode, DecodedPacket
 from ground.sessionlog.records import packet_record, event_record, to_jsonl
 
-# What consumers receive on the registry: the decoded packet plus the injected
-# receive timestamp and RSSI (so live-flights / OLED / dashboard never read a clock).
-Observation = namedtuple("Observation", "received_at rssi packet")
+# What consumers receive on the registry: the decoded packet, the injected wall
+# `received_at` (what gets RECORDED) and RSSI, plus a `mono` monotonic-clock value
+# for step-immune silence/gap arithmetic. Consumers never read a clock themselves.
+Observation = namedtuple("Observation", "received_at rssi packet mono")
 
 
 class IngestCore:
@@ -41,9 +42,10 @@ class IngestCore:
         self.anomalies = {}         # (sys, src) -> count (our SYS, unknown SRC)
         self.id_mismatches = {}     # (sys, callsign) -> count (CALL != configured binding)
 
-    def handle(self, rssi, payload, received_at):
+    def handle(self, rssi, payload, received_at, mono=0.0):
         """Process one received frame. Always persists the raw (so history can be
-        re-decoded, D1); only accepted traffic updates stats and fans out."""
+        re-decoded, D1); only accepted traffic updates stats and fans out. `mono`
+        is a monotonic-clock value for step-immune downstream timing."""
         d = decode(payload)
         if not isinstance(d, DecodedPacket):
             self.errors += 1
@@ -75,7 +77,7 @@ class IngestCore:
         self._sink(to_jsonl(packet_record(received_at, rssi, d)))
         if "SEQ" in f:
             self._stats.update(sys, src, f["SEQ"], rssi)
-        self._registry.dispatch(Observation(received_at, rssi, d))
+        self._registry.dispatch(Observation(received_at, rssi, d, mono))
 
         if call:                                             # Part-97 ID audit trail
             self._sink(to_jsonl(event_record(received_at, "id", callsign=call, sys=sys, src=src)))

@@ -101,16 +101,17 @@ def main() -> None:
 
     try:
         while not stop.is_set():
-            now = now_iso()                      # stamp time once per iteration (injected)
+            now = now_iso()                      # wall time — what gets recorded
+            mono = time.monotonic()              # monotonic — step-immune silence/duration
             frame = rx.receive()
             if frame:
-                core.handle(frame.rssi_dbm, frame.payload, now)
+                core.handle(frame.rssi_dbm, frame.payload, now, mono)
             else:
                 time.sleep(0.02)
-            live.tick(now)                       # cheap silence sweep between polls; never blocks RX
+            live.tick(now, mono)                 # cheap step-immune sweep; never blocks RX
     finally:
         now = now_iso()
-        live.tick(now)                           # final sweep; still-open flights left OPEN (rebuild resolves)
+        live.tick(now, time.monotonic())         # final sweep; still-open flights left OPEN (rebuild resolves)
         writer.sink(to_jsonl(event_record(
             now, "service_stop",
             decoded=core.decoded, errors=core.errors, foreign=core.foreign,

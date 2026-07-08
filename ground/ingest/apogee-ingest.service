@@ -1,12 +1,18 @@
 [Unit]
 Description=Apogee ground telemetry ingest (single radio owner)
-After=network.target
+# Start after the clock can be trusted: PiSugar RTC (offline/field) and, at home,
+# NTP. time-sync.target is Wants (best-effort) so the field case never blocks on it.
+After=network-online.target time-sync.target pisugar-server.service
+Wants=network-online.target time-sync.target
 # Only one process may own the SPI radio — do not run rx_test.py etc. alongside.
 
 [Service]
 Type=simple
 User=rocketman
 WorkingDirectory=/home/rocketman/lora-rocket-telemetry
+# Belt-and-suspenders: never open a session under a bogus clock. Wait up to ~30 s
+# for a sane year (from the RTC or NTP) before starting.
+ExecStartPre=/usr/bin/bash -c 'for i in $(seq 1 30); do [ "$(date +%%Y)" -ge 2024 ] && exit 0; sleep 1; done'
 ExecStart=/usr/bin/python3 -m ground.ingest.service
 Restart=on-failure
 RestartSec=3

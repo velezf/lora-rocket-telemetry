@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH)._
+_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 merged & deployed._
 
 ## Where we are
 
@@ -21,8 +21,12 @@ events). Plus an offline **flights CLI** (`rebuild`/`list`/`annotate`/`close`/`o
 over a three-files/one-writer model (session ← service, ops journal ← CLI, index ← derivation).
 **Field-time hardening** landed too: PiSugar RTC initialized + `auto_rtc_sync`, systemd clock
 gate, and monotonic silence/duration deltas (immune to wall-clock steps); session filenames
-are collision-proof. **Next: 4.4 dashboard (Flask + Chart.js) + 4.6 status OLED**, both
-consuming 4.2. Epic 8 groundwork merged.
+are collision-proof. **4.4 dashboard + 4.6 status OLED are now done, merged, and deployed**
+— live Flask/Chart.js dashboard (density pass: header callsign, per-SRC flight badge + live
+age, T+, RSSI sparkline, events feed, health line) + SSD1306 status OLED on `0x3d`, both on a
+per-SRC **AGL pad baseline** (ALT−baseline while `St:0`; raw ALT untouched in records; resets
+on `flight_close`). Bench-verified on `apogee-gs` against live sled telemetry. **Epic 4
+remaining: 4.5 web publish only, gated on the first real flight.** Epic 8 groundwork merged.
 
 ## Ground station (`apogee-gs`) — access
 
@@ -32,8 +36,11 @@ consuming 4.2. Epic 8 groundwork merged.
 - **Claude Code:** installed (`2.1.197`), on PATH (`~/.local/bin`), **authenticated** via
   `claude auth login` (claude.ai, Max). Headless `claude -p` works.
 - **OS:** Raspberry Pi OS 64-bit, **Trixie / Debian 13** (not Bookworm). **Python 3.13.5**
-  (`/usr/bin/python3`), `venv` works. No system `pip` (PEP 668 — use venv). A **`~/gs-venv`**
-  venv exists (`luma.oled` for the OLED); **`uv` not yet installed**.
+  (`/usr/bin/python3`), `venv` works. No system `pip` (PEP 668 — use venv). **The
+  `apogee-ingest` service runs from `~/gs-venv`** (`ExecStart`), the one env with all ground
+  deps: `luma.oled`+`pillow` (pip) and `flask`/`spidev`/`lgpio` (via `--system-site-packages`).
+  **System `python3` is no longer sufficient** — an SD-card rebuild must recreate `~/gs-venv`
+  (`--system-site-packages`) with `luma.oled`. **`uv` not yet installed**.
 - **Repo:** cloned at `~/lora-rocket-telemetry` via a **read-only deploy key** (`apogee-gs`);
   `git pull` works (Pi pulled to current `main`).
 - **Wi-Fi:** home **WideRoad** (priority 0) first, **iPhone 17 hotspot** fallback
@@ -75,7 +82,7 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
 | 2 — Pi 5 ground-station bring-up | ✅ **2.1–2.6 done.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, 6 panel LEDs; **2.5 RX driver** in `ground/rx/`; **2.6 low-battery auto-shutdown** configured. **Remaining: 2.2 hotspot fallback field test** (physical); panel-LED *functions* unassigned (Epic 4). |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.3 done & merged.** 4.1 decoder (`ground/decode/`, structured errors, additive-tag policy); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit; enabled, reboot-surviving); 4.3 **flight logging** (`ground/flights/` — journal-based segmentation, concurrent multi-bird flights, export, CLI; index = f(session, ops), manual ops beat silence). Full ground suite 91 tests. **Remaining: 4.4 dashboard, 4.6 OLED, 4.5 web publish.** |
+| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live. Full ground suite 110 tests. **Remaining: 4.5 web publish only — gated on the first real flight.** |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -83,8 +90,9 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 
 ## Open branches (pending review/merge)
 
-**None** — all Epic 1–4.3 work is merged and pushed to `origin/main`. Recent merged
-branches: `feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,service}`,
+**None** — all Epic 1–4.4 + 4.6 work is merged and pushed to `origin/main`. Recent merged
+branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
+`feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,service}`,
 `feat/callsign-id`, `feat/flight-logging` (+ earlier Epic 1–3 branches).
 
 ## Locked decisions
@@ -130,13 +138,13 @@ branches: `feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,s
 
 ## Immediate next steps
 
-1. **4.4 dashboard** (Flask + Chart.js): live-state snapshot + recent-packet ring buffer,
-   gauges + altitude trace, phone-viewable; bench-test over home Wi-Fi first.
-2. **4.6 status OLED** (`luma.oled` on I²C1 `0x3d`; verify vs PiSugar `0x57`): altitude /
-   peak / RSSI / SEQ-loss / flight-state per SRC. Reuse the handheld rendering.
-3. **4.5 web publish** (after the 4.3 export format settles): Quarto + pandas + Plotly
-   per-flight pages → velezf.github.io.
-4. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
+1. **Live shake test** (Frank does the physical shake): watch a full `flight_open`→
+   `flight_close` cycle end-to-end on real data — dashboard badge/T+/AGL, OLED ascent page,
+   baseline reset, flights index `2026-07-08-F1`, CLI annotate + export + derivation round-trip.
+   **STOP after and review the numbers before 4.5.**
+2. **4.5 web publish** (gated on the first real flight): Quarto + pandas + Plotly per-flight
+   pages → velezf.github.io. Propose repo layout + `flights publish <id>` command first.
+3. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
    tests are under "Physical tasks" above.)*
 
 ## Notes / gotchas
@@ -158,3 +166,8 @@ branches: `feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,s
   `rx_test.py` / `rx_driver_check.py` scratch scripts were deleted in the 4.2 branch.
 - **One radio owner:** `apogee-ingest.service` owns SPI continuously — stop it
   (`sudo systemctl stop apogee-ingest`) before any direct radio work; never a second owner.
+- **Service runs from `~/gs-venv`:** `ExecStart` points at `~/gs-venv/bin/python` (the OLED
+  needs `luma.oled`, which system `python3` lacks). An **SD-card rebuild must recreate
+  `~/gs-venv` with `--system-site-packages`** and pip-install `luma.oled` (`flask`/`spidev`/
+  `lgpio` come through system-site). If the venv is missing the unit fails to start —
+  system `python3` is no longer a drop-in substitute.

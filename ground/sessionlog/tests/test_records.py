@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false, reportArgumentType=false
+# ^ tests access decode() union results after asserting the type at runtime.
 """Epic 4.2 session-log record builders — pure/deterministic tests.
 
 Run from repo root:  python3 -m unittest ground.sessionlog.tests.test_records

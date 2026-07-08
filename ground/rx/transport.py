@@ -12,8 +12,8 @@ import time
 class SpidevLgpioTransport:
     def __init__(self, spi_bus: int = 0, spi_cs: int = 1, reset_gpio: int = 25,
                  max_speed_hz: int = 1_000_000, gpiochip: int = 0):
-        import spidev
-        import lgpio
+        import spidev  # pyright: ignore[reportMissingImports]  # Pi-only dep
+        import lgpio  # pyright: ignore[reportMissingImports]  # Pi-only dep
         self._lgpio = lgpio
         self._reset_gpio = reset_gpio
         self._h = lgpio.gpiochip_open(gpiochip)

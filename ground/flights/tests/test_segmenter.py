@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false
+# ^ seg.close() returns Flight|None; tests access it after asserting a flight is open.
 """Host tests for the flight segmentation state machine.
 
 Pure: timestamps + a monotonic clock are passed in, so open/close decisions and

@@ -14,6 +14,7 @@ Field config:    $APOGEE_CONFIG (default ~/.config/apogee/ingest.json) — overr
 import json
 import os
 import queue
+import secrets
 import signal
 import threading
 import time
@@ -34,6 +35,13 @@ CONFIG_PATH = Path(os.environ.get("APOGEE_CONFIG", str(Path.home() / ".config/ap
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def session_filename(ts: str) -> str:
+    """Session log name with a boot-unique random suffix so two starts in the same
+    second can never collide and silently append two runs into one file — uniqueness
+    by construction, independent of clock correctness."""
+    return f"session-{ts}-{secrets.token_hex(3)}.jsonl"
 
 
 def load_config() -> dict:
@@ -75,7 +83,7 @@ class JsonlWriter(threading.Thread):
 def main() -> None:
     cfg = load_config()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    session = "session-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + ".jsonl"
+    session = session_filename(datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     writer = JsonlWriter(DATA_DIR / session)
     writer.start()
 

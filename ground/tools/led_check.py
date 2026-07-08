@@ -26,7 +26,7 @@ import sys
 import time
 
 try:
-    from gpiozero import LED
+    from gpiozero import LED  # pyright: ignore[reportMissingImports]  # Pi-only dep
 except ImportError:
     sys.exit("gpiozero not found -- install with: sudo apt install python3-gpiozero")
 

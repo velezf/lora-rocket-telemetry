@@ -27,8 +27,10 @@ from ground.linkstats.linkstats import LinkStats
 from ground.ingest.registry import ObserverRegistry
 from ground.ingest.core import IngestCore
 from ground.flights.live import LiveFlights
-from ground.dashboard.model import LiveState, view_model
+from ground.dashboard.model import LiveState, view_model, EventsRing
 from ground.dashboard.app import serve, DASHBOARD_PORT
+from ground.oled.render import oled_lines
+from ground.oled.display import OledDisplay
 from ground.sessionlog.records import event_record, to_jsonl
 
 DATA_DIR = Path(os.environ.get("APOGEE_DATA", str(Path.home() / "apogee-data")))
@@ -91,16 +93,22 @@ def main() -> None:
 
     stats = LinkStats()
     registry = ObserverRegistry()
-    core = IngestCore(writer.sink, stats, registry,
+    events_ring = EventsRing()
+
+    def sink(line):     # tee: durable JSONL log + a bounded ring for the dashboard events feed
+        writer.sink(line)
+        events_ring.capture(line)
+
+    core = IngestCore(sink, stats, registry,
                       allowed_sys=cfg["allowed_sys"], known_src=cfg["known_src"],
                       callsign_binding=cfg["callsign_binding"])
-    live = LiveFlights(writer.sink, DATA_DIR / "flights-snapshot.json",
+    live = LiveFlights(sink, DATA_DIR / "flights-snapshot.json",
                        silence_timeout_s=cfg["silence_timeout_s"])
     registry.register(live.on_observation)
     live_state = LiveState()
     registry.register(live_state.update)
 
-    writer.sink(to_jsonl(event_record(now_iso(), "service_start", session=session, config=cfg)))
+    sink(to_jsonl(event_record(now_iso(), "service_start", session=session, config=cfg)))
     print(f"[ingest] {DATA_DIR / session}  allowed_sys={cfg['allowed_sys']} known_src={cfg['known_src']}", flush=True)
 
     transport = SpidevLgpioTransport()
@@ -112,10 +120,14 @@ def main() -> None:
     start_mono = time.monotonic()
 
     def _view_model():
-        health = {"session": session, "uptime_s": round(time.monotonic() - start_mono),
+        up = max(1.0, time.monotonic() - start_mono)
+        health = {"session": session, "uptime_s": round(up),
                   "decoded": core.decoded, "decode_errors": core.errors,
-                  "crc_errors": getattr(rx, "crc_errors", 0)}
-        return view_model(live_state.snapshot(), stats.snapshot(), live.open_flight_ids(), health)
+                  "crc_errors": getattr(rx, "crc_errors", 0),
+                  "foreign": sum(core.foreign.values()), "anomalies": sum(core.anomalies.values()),
+                  "packets_per_min": round(60.0 * core.decoded / up, 1)}
+        return view_model(live_state.snapshot(), stats.snapshot(), live.open_flight_ids(),
+                          health, events=events_ring.recent())
 
     def _serve():
         try:
@@ -125,6 +137,26 @@ def main() -> None:
 
     threading.Thread(target=_serve, daemon=True).start()
     print(f"[ingest] dashboard on :{DASHBOARD_PORT}", flush=True)
+
+    # Status OLED (Pi-only, I2C 0x3d). Construction probes the address; a missing or
+    # failing OLED degrades silently and never touches the radio.
+    oled = None
+    try:
+        oled = OledDisplay()
+        print("[ingest] OLED on 0x3d", flush=True)
+    except Exception as exc:  # noqa: BLE001 — OLED must never take down the radio owner
+        print(f"[ingest] OLED off: {exc}", flush=True)
+
+    def _oled_update(obs):
+        if oled is None:
+            return
+        src = obs.packet.fields.get("SRC")
+        panel = next((p for p in _view_model()["panels"] if p["src"] == src), None)
+        if panel:
+            oled.show(oled_lines(panel))
+
+    if oled is not None:
+        registry.register(_oled_update)
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -139,11 +171,13 @@ def main() -> None:
                 core.handle(frame.rssi_dbm, frame.payload, now, mono)
             else:
                 time.sleep(0.02)
-            live.tick(now, mono)                 # cheap step-immune sweep; never blocks RX
+            for fl in live.tick(now, mono):      # cheap step-immune sweep; never blocks RX
+                live_state.reset_baseline(fl.src)   # a closed flight resets its pad/AGL baseline
     finally:
         now = now_iso()
-        live.tick(now, time.monotonic())         # final sweep; still-open flights left OPEN (rebuild resolves)
-        writer.sink(to_jsonl(event_record(
+        for fl in live.tick(now, time.monotonic()):   # final sweep; still-open flights left OPEN
+            live_state.reset_baseline(fl.src)
+        sink(to_jsonl(event_record(
             now, "service_stop",
             decoded=core.decoded, errors=core.errors, foreign=core.foreign,
             anomalies={f"{k[0]}:{k[1]}": v for k, v in core.anomalies.items()})))

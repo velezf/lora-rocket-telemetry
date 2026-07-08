@@ -13,7 +13,9 @@ WorkingDirectory=/home/rocketman/lora-rocket-telemetry
 # Belt-and-suspenders: never open a session under a bogus clock. Wait up to ~30 s
 # for a sane year (from the RTC or NTP) before starting.
 ExecStartPre=/usr/bin/bash -c 'for i in $(seq 1 30); do [ "$(date +%%Y)" -ge 2024 ] && exit 0; sleep 1; done'
-ExecStart=/usr/bin/python3 -m ground.ingest.service
+# gs-venv has all ground deps (luma.oled + pillow via pip; flask/spidev/lgpio via
+# --system-site-packages). Using it keeps the OLED + dashboard + radio in one env.
+ExecStart=/home/rocketman/gs-venv/bin/python -m ground.ingest.service
 Restart=on-failure
 RestartSec=3
 # Clean shutdown: SIGTERM -> service writes service_stop + drains the log queue.

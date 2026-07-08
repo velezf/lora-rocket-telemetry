@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Apogee ground station</title>
+  <!-- Chart.js via CDN: fine for the home-Wi-Fi bench; vendor it for the field (rider). -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background:#0c0f14; color:#e6edf3; }
+    header { padding: 10px 14px; background:#131923; position:sticky; top:0; }
+    header b { color:#7ee787; }
+    #health { font-size:12px; color:#9aa7b4; margin-top:2px; }
+    .panel { margin:10px; padding:12px; background:#131923; border-radius:12px; }
+    .panel h2 { margin:0 0 6px; font-size:16px; }
+    .flag { font-size:12px; padding:1px 7px; border-radius:8px; background:#243040; color:#9aa7b4; }
+    .flag.open { background:#1f6f43; color:#d7ffe6; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0; }
+    .cell .k { font-size:11px; color:#9aa7b4; } .cell .v { font-size:19px; font-weight:600; }
+    canvas { width:100%!important; height:150px!important; }
+    .st-ascent{color:#7ee787} .st-descent{color:#ffa657} .st-pad{color:#9aa7b4}
+  </style>
+</head>
+<body>
+  <header>
+    <b>Apogee</b> ground station <span id="conn"></span>
+    <div id="health"></div>
+  </header>
+  <main id="panels"></main>
+
+<script>
+const charts = {};
+function cell(k, v){ return `<div class="cell"><div class="k">${k}</div><div class="v">${v ?? '—'}</div></div>`; }
+
+function render(vm){
+  document.getElementById('conn').textContent = '● live';
+  const h = vm.health || {};
+  document.getElementById('health').textContent =
+    `session ${h.session ?? '—'} · up ${h.uptime_s ?? '—'}s · decoded ${h.decoded ?? '—'} · CRC-err ${h.crc_errors ?? '—'}`;
+
+  const main = document.getElementById('panels');
+  for(const p of vm.panels){
+    let el = document.getElementById('src-'+p.src);
+    if(!el){
+      el = document.createElement('section'); el.className='panel'; el.id='src-'+p.src;
+      el.innerHTML = `<h2>SRC:${p.src} <span class="flag" id="fl-${p.src}"></span></h2>
+        <div class="grid">
+          <div class="cell"><div class="k">ALT</div><div class="v" id="alt-${p.src}"></div></div>
+          <div class="cell"><div class="k">PEAK</div><div class="v" id="pk-${p.src}"></div></div>
+          <div class="cell"><div class="k">STATE</div><div class="v" id="st-${p.src}"></div></div>
+          <div class="cell"><div class="k">RSSI</div><div class="v" id="rs-${p.src}"></div></div>
+          <div class="cell"><div class="k">SEQ LOSS</div><div class="v" id="ls-${p.src}"></div></div>
+          <div class="cell"><div class="k">RX</div><div class="v" id="rx-${p.src}"></div></div>
+        </div>
+        <div style="font-size:12px;color:#9aa7b4" id="cs-${p.src}"></div>
+        <canvas id="cv-${p.src}"></canvas>`;
+      main.appendChild(el);
+      charts[p.src] = new Chart(document.getElementById('cv-'+p.src), {
+        type:'line',
+        data:{ labels:[], datasets:[{ data:[], borderColor:'#58a6ff', pointRadius:0, tension:0.2 }] },
+        options:{ animation:false, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{ticks:{color:'#9aa7b4'}}} }
+      });
+    }
+    document.getElementById('alt-'+p.src).textContent = p.altitude_ft!=null ? p.altitude_ft+'ft' : '—';
+    document.getElementById('pk-'+p.src).textContent  = p.peak_ft!=null ? p.peak_ft+'ft' : '—';
+    const st = document.getElementById('st-'+p.src); st.textContent = p.state; st.className = 'v st-'+p.state;
+    document.getElementById('rs-'+p.src).textContent = p.rssi!=null ? p.rssi+'dBm' : '—';
+    document.getElementById('ls-'+p.src).textContent = (p.seq_loss_pct ?? 0)+'%';
+    document.getElementById('rx-'+p.src).textContent = p.packets_rx ?? 0;
+    document.getElementById('cs-'+p.src).textContent = (p.callsign ? 'ID '+p.callsign+'  ' : '') +
+      (p.flight_id ? 'flight '+p.flight_id : '');
+    const fl = document.getElementById('fl-'+p.src);
+    fl.textContent = p.flight_open ? 'IN FLIGHT' : 'idle'; fl.className = 'flag'+(p.flight_open?' open':'');
+    const c = charts[p.src];
+    c.data.labels = p.trace.map(x=>x.t); c.data.datasets[0].data = p.trace.map(x=>x.alt); c.update();
+  }
+}
+
+async function poll(){
+  try{ const r = await fetch('/api/state'); render(await r.json()); }
+  catch(e){ document.getElementById('conn').textContent = '○ reconnecting'; }
+}
+poll(); setInterval(poll, 1500);
+</script>
+</body>
+</html>

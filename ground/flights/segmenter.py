@@ -28,6 +28,9 @@ class FlightSegmenter:
     def open_srcs(self):
         return list(self._open.keys())
 
+    def open_flight_ids(self):
+        return {src: fl["flight_id"] for src, fl in self._open.items()}
+
     def _start(self, received_at, t, src, alt, rssi, seq, packets):
         fid = next_flight_id(received_at[:10], self._ids)
         self._ids.append(fid)

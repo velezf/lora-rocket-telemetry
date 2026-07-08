@@ -27,6 +27,8 @@ from ground.linkstats.linkstats import LinkStats
 from ground.ingest.registry import ObserverRegistry
 from ground.ingest.core import IngestCore
 from ground.flights.live import LiveFlights
+from ground.dashboard.model import LiveState, view_model
+from ground.dashboard.app import serve, DASHBOARD_PORT
 from ground.sessionlog.records import event_record, to_jsonl
 
 DATA_DIR = Path(os.environ.get("APOGEE_DATA", str(Path.home() / "apogee-data")))
@@ -95,6 +97,8 @@ def main() -> None:
     live = LiveFlights(writer.sink, DATA_DIR / "flights-snapshot.json",
                        silence_timeout_s=cfg["silence_timeout_s"])
     registry.register(live.on_observation)
+    live_state = LiveState()
+    registry.register(live_state.update)
 
     writer.sink(to_jsonl(event_record(now_iso(), "service_start", session=session, config=cfg)))
     print(f"[ingest] {DATA_DIR / session}  allowed_sys={cfg['allowed_sys']} known_src={cfg['known_src']}", flush=True)
@@ -102,6 +106,25 @@ def main() -> None:
     transport = SpidevLgpioTransport()
     rx = SX127xRx(transport, LoRaConfig())
     rx.configure()
+
+    # Live dashboard: in-process daemon thread, reads immutable snapshots only —
+    # never the radio/log; degrades silently if Flask is absent (never crashes the owner).
+    start_mono = time.monotonic()
+
+    def _view_model():
+        health = {"session": session, "uptime_s": round(time.monotonic() - start_mono),
+                  "decoded": core.decoded, "decode_errors": core.errors,
+                  "crc_errors": getattr(rx, "crc_errors", 0)}
+        return view_model(live_state.snapshot(), stats.snapshot(), live.open_flight_ids(), health)
+
+    def _serve():
+        try:
+            serve(_view_model)
+        except Exception as exc:  # noqa: BLE001 — the dashboard must never take down the radio owner
+            print(f"[ingest] dashboard off: {exc}", flush=True)
+
+    threading.Thread(target=_serve, daemon=True).start()
+    print(f"[ingest] dashboard on :{DASHBOARD_PORT}", flush=True)
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

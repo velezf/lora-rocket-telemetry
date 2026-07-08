@@ -25,6 +25,10 @@ class LiveFlights:
     def open_srcs(self):
         return self._seg.open_srcs()
 
+    def open_flight_ids(self):
+        """{src: flight_id} for currently-open flights (for the dashboard/OLED)."""
+        return self._seg.open_flight_ids()
+
     def on_observation(self, obs):
         """Registry consumer: obs = Observation(received_at, rssi, packet, mono).
         Records use the wall `received_at`; silence/duration use `mono`."""

@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 merged & deployed._
+_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 merged & deployed; first flight F1 logged._
 
 ## Where we are
 
@@ -82,7 +82,7 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
 | 2 — Pi 5 ground-station bring-up | ✅ **2.1–2.6 done.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, 6 panel LEDs; **2.5 RX driver** in `ground/rx/`; **2.6 low-battery auto-shutdown** configured. **Remaining: 2.2 hotspot fallback field test** (physical); panel-LED *functions* unassigned (Epic 4). |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live. Full ground suite 110 tests. **Remaining: 4.5 web publish only — gated on the first real flight.** |
+| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). Full ground suite 113 tests. **Remaining: 4.5 web publish only.** |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -126,29 +126,50 @@ branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
    binding) already merged; the **lander (Epic 7) inherits the ID-timer obligation.**
 5. **`BAT` battery go/no-go tag** — a derived pad-check go/no-go indicator to surface on the
    dashboard/OLED (raw volts already ride `Batt:`; this is the launch-readiness signal).
+6. **St-dependent TX rate** — fast in boost/descent, slow on pad/landed, for flight-record
+   resolution. **Coupled to detection:** today the ADXL is read *once per TX loop* (`delay(1000)`
+   in `firmware/src/main.cpp` — **launch detect samples at the 1 Hz TX cadence, no FIFO/ISR**),
+   so a faster boost-phase TX rate *also* sharpens launch/apogee detection and MET granularity.
+   **Do the duty-cycle / airtime math first** (ISM-band airtime budget + LoRa ToA at the chosen
+   SF/BW) before picking rates; a cleaner design may decouple detection sampling (fast, FIFO/ISR)
+   from TX cadence (airtime-limited). Re-runs the e2e gate.
 
 ## Physical tasks (Frank — not CC)
 
 - [ ] **Overnight no-network boot** — power off overnight, boot with Wi-Fi off, confirm
       `date` is correct (validates the PiSugar RTC + `auto_rtc_sync`).
-- [ ] **Charge the sled** — LiPo was down to **3.56 V**.
-- [ ] **Live shake test** — shake the sled (g > 3 → `St` ascent) to watch a full
-      `flight_open`→`flight_close` cycle in `~/apogee-data/session-*.jsonl`.
 - [ ] **2.2 hotspot field test** — away from home Wi-Fi, confirm fallback to the iPhone hotspot.
+- [x] **Live shake test — done 2026-07-08** (see first flight below); hand-*jerk* peaked 2.2 g
+      (missed the 1 Hz sample), a sustained **circular swing** hit 6.4 g and tripped it.
+
+## First flight — `2026-07-08-F1` (shake test, bench)
+
+The full live cycle is proven end-to-end on real RF: **pad→ascent→descent→close**, dashboard
+badge/T+/AGL, OLED ascent page, and the AGL **baseline reset on `flight_close`** all fired.
+Index entry: **dur 87.6 s, 75 rx, 1 lost** (one real SEQ gap mid-swing), peak −74 ft raw / 8 ft
+AGL, RSSI −38..−14. **Derivation round-trip byte-identical** (rebuilt twice → same index; the
+annotation survives). Captured as a **version-controlled golden fixture** —
+`ground/flights/tests/fixtures/f1_{session,ops}.jsonl` + `test_f1_golden.py` asserts
+decode→segment→derive reproduces F1 exactly, so real over-the-air bytes now guard every future
+contract change. (Profile is bench noise — a swing, not a climb; a real *trajectory* awaits an
+actual flight.)
 
 ## Immediate next steps
 
-1. **Live shake test** (Frank does the physical shake): watch a full `flight_open`→
-   `flight_close` cycle end-to-end on real data — dashboard badge/T+/AGL, OLED ascent page,
-   baseline reset, flights index `2026-07-08-F1`, CLI annotate + export + derivation round-trip.
-   **STOP after and review the numbers before 4.5.**
-2. **4.5 web publish** (gated on the first real flight): Quarto + pandas + Plotly per-flight
-   pages → velezf.github.io. Propose repo layout + `flights publish <id>` command first.
-3. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
+1. **4.5 web publish** — the only Epic 4 item left. Quarto + pandas + Plotly per-flight pages →
+   velezf.github.io, one permalink per flight. **Propose repo layout + `flights publish <id>`
+   command for Frank's sign-off before building anything.**
+2. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
    tests are under "Physical tasks" above.)*
 
 ## Notes / gotchas
 
+- **Real-RF golden fixture:** `ground/flights/tests/fixtures/f1_*.jsonl` is the F1 shake-test
+  slice; `test_f1_golden.py` guards decode→segment→derive against real bytes. **Treat it like the
+  ADR golden vector** — a change that alters F1's decoded fields or index entry is a contract break.
+- **Launch detect samples at 1 Hz** (TX-coupled; `firmware/src/main.cpp` reads the ADXL once per
+  `delay(1000)` loop, no FIFO/ISR). Bench hand-*jerks* fall between samples — use a **sustained
+  circular swing** (>3 g held across a sample) to trip launch on the bench. See Epic 6 rider #6.
 - **Standing merge gate:** the e2e check (sled TX → `ground/rx/` driver → payload matches
   the ADR fixtures) caught the newlib-nano float-printf bug that host tests could NOT —
   **keep the e2e check as a required gate for anything touching encode/decode.**

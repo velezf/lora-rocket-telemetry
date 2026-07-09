@@ -34,7 +34,7 @@ class TestF1Golden(unittest.TestCase):
     def test_decode_reproduces_every_real_packet(self):
         """Each recorded raw ASCII frame re-decodes to exactly the stored fields —
         the decoder against real over-the-air bytes, not a synthesized vector."""
-        self.assertEqual(len(self.packets), 75)
+        self.assertEqual(len(self.packets), 94)     # 19 pre-boost pad + 75 flight
         for r in self.packets:
             self.assertEqual(decode(r["raw"].encode()).fields, r["fields"], r["raw"])
 
@@ -53,6 +53,9 @@ class TestF1Golden(unittest.TestCase):
             "peak_alt_ft": -74, "duration_s": 87.556,
             "packets_rx": 75, "packets_lost": 1,          # one real SEQ gap during the swing
             "rssi_min": -38, "rssi_max": -14,
+            # v2 AGL zero, recomputed retrospectively from the 19 quiet pre-boost pad
+            # packets (SEQ 0-18, ALT -83..-85): peak AGL = -74 - (-84) = 10 ft (noise).
+            "baseline_ft": -84, "baseline_n": 15,
         })
 
     def test_derivation_is_deterministic(self):

@@ -1,0 +1,16 @@
+# Stage-1 analysis/render env for the flights portfolio writeup ONLY (Portfolio
+# Workflow doc): provides the `lora-rocket-telemetry` jupyter kernel that renders
+# projects/lora-flights.qmd (matplotlib/seaborn). The ground station + host tests
+# run on system python3 — this venv is not their runtime.
+[project]
+name = "lora-rocket-telemetry"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.0",
+    "numpy>=2.5.1",
+    "pandas>=3.0.3",
+    "seaborn>=0.13.2",
+]

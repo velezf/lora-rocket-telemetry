@@ -141,5 +141,41 @@ class TestEventsRing(unittest.TestCase):
         self.assertEqual(ring.recent(), [])
 
 
+class TestBaselineV2Live(unittest.TestCase):
+    def test_baseline_locks_at_flight_open_and_holds(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"t{i}", 1, 0, -84, -84, i))       # quiet pad
+        pad = view_model(s.snapshot(), {}, {}, {})["panels"][0]
+        self.assertEqual(pad["baseline_ft"], -84)           # live pad zero pre-flight
+        s.update(obs("boost", 1, 1, 500, 500, 18))          # flight opens -> lock
+        p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
+        self.assertEqual(p["baseline_ft"], -84)             # locked from the pre-boost window
+        self.assertEqual(p["altitude_ft"], 584)             # 500 - (-84)
+        s.update(obs("asc2", 1, 1, 900, 900, 19))           # climbing
+        p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
+        self.assertEqual(p["baseline_ft"], -84)             # HELD, not dragged up by flight ALT
+        self.assertEqual(p["altitude_ft"], 984)
+
+    def test_reset_unlocks_and_falls_back_to_raw(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"t{i}", 1, 0, -84, -84, i))
+        s.update(obs("boost", 1, 1, 900, 900, 18))
+        s.reset_baseline(1)                                 # flight_close
+        p = view_model(s.snapshot(), {}, {}, {})["panels"][0]
+        self.assertIsNone(p["baseline_ft"])                 # unlocked + history cleared
+        self.assertEqual(p["altitude_ft"], 900)             # AGL falls back to raw
+
+    def test_unstable_pad_does_not_lock_a_baseline(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"n{i}", 1, 0, -84 if i % 2 else -50, 0, i))   # noisy pad
+        s.update(obs("boost", 1, 1, 500, 500, 18))
+        p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
+        self.assertIsNone(p["baseline_ft"])                 # gate rejects -> no lock
+        self.assertEqual(p["altitude_ft"], 500)             # raw during the flight
+
+
 if __name__ == "__main__":
     unittest.main()

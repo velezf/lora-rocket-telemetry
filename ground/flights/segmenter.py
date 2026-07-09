@@ -15,8 +15,10 @@ Flight IDs come from ground.flights.flights.next_flight_id (stable YYYY-MM-DD-Fn
 assigned at open and never reused.
 """
 from ground.flights.flights import Flight, next_flight_id
+from ground.flights.baseline import pad_baseline, WINDOW, EXCLUDE_TAIL
 
 ST_ASCENT = 1  # ADR 0001 St codes: 0 pad / 1 ascent / 2 descent
+_HIST_LEN = WINDOW + EXCLUDE_TAIL   # trailing ALT retained per SRC for the baseline
 
 
 class FlightSegmenter:
@@ -24,6 +26,7 @@ class FlightSegmenter:
         self.silence_timeout_s = silence_timeout_s
         self._open = {}        # src -> working flight state
         self._ids = []         # every flight id ever assigned (next_flight_id + no reuse)
+        self._alt_hist = {}    # src -> recent ALT (pre-boost window feeds the AGL baseline)
 
     def open_srcs(self):
         return list(self._open.keys())
@@ -31,9 +34,17 @@ class FlightSegmenter:
     def open_flight_ids(self):
         return {src: fl["flight_id"] for src, fl in self._open.items()}
 
+    def _push_alt(self, src, alt):
+        buf = self._alt_hist.setdefault(src, [])
+        buf.append(alt)
+        del buf[:-_HIST_LEN]        # keep only the trailing window
+
     def _start(self, received_at, t, src, alt, rssi, seq, packets):
         fid = next_flight_id(received_at[:10], self._ids)
         self._ids.append(fid)
+        # Baseline locked retrospectively from the pre-boost window (the opening packet
+        # is pushed to history only afterward, so it never enters its own baseline).
+        base_ft, base_n = pad_baseline(self._alt_hist.get(src, []))
         self._open[src] = {
             "flight_id": fid, "src": src,
             "t_start_iso": received_at, "t_start": t,
@@ -41,6 +52,7 @@ class FlightSegmenter:
             "peak_alt": alt, "packets": packets,
             "rssi_min": rssi, "rssi_max": rssi,
             "last_seq": seq, "gaps": 0,
+            "baseline_ft": base_ft, "baseline_n": base_n,
         }
         return fid
 
@@ -54,8 +66,12 @@ class FlightSegmenter:
         fl = self._open.get(src)
         if fl is None:
             if st == ST_ASCENT:
-                return self._start(received_at, t, src, alt, rssi, seq, packets=1)  # -> new flight_id
+                fid = self._start(received_at, t, src, alt, rssi, seq, packets=1)  # -> new flight_id
+                self._push_alt(src, alt)
+                return fid
+            self._push_alt(src, alt)   # pad packet -> baseline history
             return None  # pad packets (or descent w/o prior ascent) don't open a flight
+        self._push_alt(src, alt)
         fl["t_end_iso"] = received_at
         fl["t_end"] = t
         fl["packets"] += 1
@@ -83,6 +99,7 @@ class FlightSegmenter:
         return self._finalize(fl) if fl else None
 
     def _finalize(self, fl) -> Flight:
+        self._alt_hist.pop(fl["src"], None)   # next flight re-establishes its own baseline
         return Flight(
             flight_id=fl["flight_id"], src=fl["src"],
             t_start=fl["t_start_iso"], t_end=fl["t_end_iso"],
@@ -93,5 +110,7 @@ class FlightSegmenter:
                 "packets_lost": fl["gaps"],
                 "rssi_min": fl["rssi_min"],
                 "rssi_max": fl["rssi_max"],
+                "baseline_ft": fl["baseline_ft"],       # v2 AGL zero (retrospective)
+                "baseline_n": fl["baseline_n"],         # samples used
             },
         )

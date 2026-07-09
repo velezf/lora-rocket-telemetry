@@ -3,7 +3,10 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 merged & deployed; F1 logged; AGL baseline v2 merged._
+_Last updated: 2026-07-08 end of night (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 deployed; F1 logged;
+AGL baseline v2 merged; 4.5 Stage-1 (data-only publisher + kernel) merged. **Next session:** the
+flights page mock is on pages-repo branch `feat/flights-section` awaiting Frank's review→merge→push;
+then Claude tags `v1.0-portfolio-genesis`. Pi 5 powered off for the night._
 
 ## Where we are
 

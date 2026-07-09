@@ -157,17 +157,32 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Immediate next steps
 
-1. **4.5 web publish** (`feat/flight-publish`) — the only Epic 4 item left. Signed-off model:
-   **render locally on the Mac**, separate **`velezf.github.io`** Pages repo, a **pure qmd-content
-   function in `ground/publish/`** (host-tested) + a thin Mac-only shell `flights publish <id>`.
-   **Manual review + push — nothing goes public without Frank's explicit push.** Review additions:
-   `--field` annotation (field elevation ASL, separate from the AGL zero); landing-page flights
-   table **leads with peak AGL**; each flight page shows **`baseline_ft` + window** so every AGL is
-   auditable. First target: publish **`2026-07-08-F1`** as the genesis entry, labelled honestly
-   (shake test, peak = sensor noise). **Propose .qmd structure + landing columns; pause for
-   sign-off on the velezf.github.io side before committing anything there.**
+1. **4.5 web publish** (`feat/flight-publish`) — **IN PROGRESS, data-driven model.** `flights
+   publish` ships **DATA ONLY** into the portfolio site (a `flights.json` summary + per-flight
+   CSVs under `projects/lora-flights/`) — never a `.qmd`. Stage-1 generator done in
+   `ground/publish/` (pure, 8 tests): `flights_summary`, `permalink`
+   (`…/projects/lora-flights.html?flight=<id>`), `write_flight_data`. The archive page is a
+   hand-polished **Stage-2** artifact authored once in the site repo: `projects/lora-flights.qmd`
+   — matplotlib/seaborn hero charts (`jupyter: lora-rocket-telemetry`, **`freeze:false`** so CI
+   re-executes on data pushes) + **OJS** value boxes / selector / `?flight=` deep links. **Site
+   env:** a uv `.venv` + registered `lora-rocket-telemetry` kernel in *this* repo (per the
+   Portfolio Workflow doc); the site's action gets **one authorized line** registering that
+   kernel in CI (no dep additions — CI already has pandas/numpy/matplotlib/seaborn). Mock built
+   with F1's real data on pages-repo branch `feat/flights-section` (committed, **not merged** —
+   Frank reviews + merges + pushes; then **Stage-3 tag** `v1.0-portfolio-genesis`). Local preview:
+   `QUARTO_PYTHON=$(pwd)/.venv/bin/python3 quarto preview projects/lora-flights.qmd`.
 2. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
    tests are under "Physical tasks" above.)*
+
+## Backlog (not now)
+
+- **"KC3ZTQ RadioRocket V2" portfolio writeup** — full Stage-2 page in the site repo when the
+  project wraps (or at first real flight). Raw material already in-repo: [ADR 0001](adr/0001-packet-format-v1.md)/
+  [0002](adr/0002-ground-rx-driver-spidev.md), [agl-baseline-v2-audit](agl-baseline-v2-audit.md),
+  [telemetry-dictionary](telemetry-dictionary.md), the Portfolio Workflow doc, this RESUME history,
+  and the genesis-flight story. Links the flight-archive page as the live exhibit. **Start
+  `references.bib` accumulating now** (per the workflow doc): N3VEM RadioRocket attribution,
+  LoRa / Part-97 sources, BMP390 / ADXL375 / 9-DoF datasheets as consulted.
 
 ## Notes / gotchas
 

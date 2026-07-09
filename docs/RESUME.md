@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 merged & deployed; first flight F1 logged._
+_Last updated: 2026-07-08 (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 merged & deployed; F1 logged; AGL baseline v2 merged._
 
 ## Where we are
 
@@ -82,7 +82,7 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
 | 2 — Pi 5 ground-station bring-up | ✅ **2.1–2.6 done.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, 6 panel LEDs; **2.5 RX driver** in `ground/rx/`; **2.6 low-battery auto-shutdown** configured. **Remaining: 2.2 hotspot fallback field test** (physical); panel-LED *functions* unassigned (Epic 4). |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). Full ground suite 113 tests. **Remaining: 4.5 web publish only.** |
+| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite 129 tests. **Remaining: 4.5 web publish only.** |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -146,19 +146,26 @@ branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
 
 The full live cycle is proven end-to-end on real RF: **pad→ascent→descent→close**, dashboard
 badge/T+/AGL, OLED ascent page, and the AGL **baseline reset on `flight_close`** all fired.
-Index entry: **dur 87.6 s, 75 rx, 1 lost** (one real SEQ gap mid-swing), peak −74 ft raw / 8 ft
-AGL, RSSI −38..−14. **Derivation round-trip byte-identical** (rebuilt twice → same index; the
-annotation survives). Captured as a **version-controlled golden fixture** —
-`ground/flights/tests/fixtures/f1_{session,ops}.jsonl` + `test_f1_golden.py` asserts
-decode→segment→derive reproduces F1 exactly, so real over-the-air bytes now guard every future
-contract change. (Profile is bench noise — a swing, not a climb; a real *trajectory* awaits an
-actual flight.)
+Index entry: **dur 87.6 s, 75 rx, 1 lost** (one real SEQ gap mid-swing), peak −74 ft raw,
+**AGL baseline −84 ft (n 15)** → peak **10 ft AGL**, RSSI −38..−14. **Derivation round-trip
+byte-identical** (rebuilt twice → same index; the annotation survives). Captured as a
+**version-controlled golden fixture** — `ground/flights/tests/fixtures/f1_{session,ops}.jsonl`
+(widened to include the 19 quiet pre-boost pad packets so the baseline recomputes) +
+`test_f1_golden.py` asserts decode→segment→derive reproduces F1 exactly (incl. baseline), so
+real over-the-air bytes now guard every future contract change. (Profile is bench noise — a
+swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits an actual flight.)
 
 ## Immediate next steps
 
-1. **4.5 web publish** — the only Epic 4 item left. Quarto + pandas + Plotly per-flight pages →
-   velezf.github.io, one permalink per flight. **Propose repo layout + `flights publish <id>`
-   command for Frank's sign-off before building anything.**
+1. **4.5 web publish** (`feat/flight-publish`) — the only Epic 4 item left. Signed-off model:
+   **render locally on the Mac**, separate **`velezf.github.io`** Pages repo, a **pure qmd-content
+   function in `ground/publish/`** (host-tested) + a thin Mac-only shell `flights publish <id>`.
+   **Manual review + push — nothing goes public without Frank's explicit push.** Review additions:
+   `--field` annotation (field elevation ASL, separate from the AGL zero); landing-page flights
+   table **leads with peak AGL**; each flight page shows **`baseline_ft` + window** so every AGL is
+   auditable. First target: publish **`2026-07-08-F1`** as the genesis entry, labelled honestly
+   (shake test, peak = sensor noise). **Propose .qmd structure + landing columns; pause for
+   sign-off on the velezf.github.io side before committing anything there.**
 2. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
    tests are under "Physical tasks" above.)*
 

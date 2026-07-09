@@ -4,13 +4,22 @@
 and swaps the reference (atomic under the GIL), so a Flask reader grabs snapshot()
 once per request and reads a frozen view — no locks, no torn reads, nothing mutated
 in place. The trace is a BOUNDED tuple (a few minutes of packets), so nothing in the
-live process grows unbounded. `view_model` assembles a snapshot + the LinkStats
-snapshot + open-flight ids + ingest health. No Flask, no HTTP, no clock — host-tested.
+live process grows unbounded.
+
+AGL zero (v2): a bounded trailing window of recent ALT feeds the pure `pad_baseline`
+(ground.flights.baseline). Before a flight the pad zero tracks the live quiet window
+(so the pad reads ~0); at flight_open the baseline is LOCKED from the pre-boost window
+and held through the flight; flight_close (reset_baseline) unlocks and clears it. Raw
+ALT is never transformed. `view_model` assembles a snapshot + LinkStats + open-flight
+ids + health. No Flask, no HTTP, no clock — host-tested.
 """
 import json
 from collections import deque
 
+from ground.flights.baseline import pad_baseline, WINDOW, EXCLUDE_TAIL
+
 _STATE_NAMES = {0: "pad", 1: "ascent", 2: "descent"}
+_HIST_LEN = WINDOW + EXCLUDE_TAIL     # enough trailing ALT for one baseline compute
 
 
 class EventsRing:
@@ -33,10 +42,9 @@ class EventsRing:
 
 
 class LiveState:
-    def __init__(self, trace_len: int = 300, pad_len: int = 30):   # ~5 min trace at 1 Hz
+    def __init__(self, trace_len: int = 300):   # ~5 min trace at 1 Hz
         self._trace_len = trace_len
-        self._pad_len = pad_len
-        self._snapshot = {}     # immutable: {src: frozen per-src dict w/ bounded trace + pad tuples}
+        self._snapshot = {}     # immutable: {src: frozen per-src dict w/ bounded trace}
 
     def snapshot(self):
         """The current immutable snapshot. Readers grab this once; it is never mutated."""
@@ -52,24 +60,36 @@ class LiveState:
         prev = self._snapshot.get(src, {})
         call = obs.packet.unknown.get("CALL") or prev.get("callsign")
         alt = f.get("ALT")
-        # one bounded trace holds both series (altitude + RSSI share the window)
+        st = f.get("St")
         trace = (prev.get("trace", ()) + ((obs.received_at, alt, obs.rssi),))[-self._trace_len:]
-        pad = prev.get("pad_window", ())
-        if f.get("St") == 0:                # accumulate the pad baseline while on the pad
-            pad = (pad + (alt,))[-self._pad_len:]
+        hist = prev.get("alt_hist", ())
+        locked = prev.get("locked_baseline")
+        in_flight = st in (1, 2)
+        # Lock the AGL zero at the transition into flight, from the PRE-boost window
+        # (the current boost packet is appended only after this decision).
+        if in_flight and locked is None:
+            locked, _ = pad_baseline(list(hist))
+        new_hist = (hist + (alt,))[-_HIST_LEN:]
+        if in_flight:
+            baseline = locked                              # held through the flight
+        else:
+            locked = None                                  # not in flight -> unlocked
+            baseline, _ = pad_baseline(list(new_hist))     # live pad zero (pad reads ~0)
         per_src = {
-            "src": src, "alt": alt, "peak": f.get("Max"), "st": f.get("St"),
+            "src": src, "alt": alt, "peak": f.get("Max"), "st": st,
             "rssi": obs.rssi, "seq": f.get("SEQ"), "met": f.get("MET"),
-            "received_at": obs.received_at, "callsign": call, "trace": trace, "pad_window": pad,
+            "received_at": obs.received_at, "callsign": call, "trace": trace,
+            "alt_hist": new_hist, "locked_baseline": locked, "baseline": baseline,
         }
         self._snapshot = {**self._snapshot, src: per_src}
 
     def reset_baseline(self, src):
-        """Clear a SRC's pad baseline (called on flight_close so the next pad period
-        re-establishes AGL fresh). Replaces the snapshot — never mutates in place."""
+        """Unlock + clear a SRC's AGL zero (called on flight_close so the next pad
+        period re-establishes it fresh). Replaces the snapshot — never mutates."""
         cur = self._snapshot.get(src)
         if cur is not None:
-            self._snapshot = {**self._snapshot, src: {**cur, "pad_window": ()}}   # REPLACE, never mutate
+            self._snapshot = {**self._snapshot, src: {
+                **cur, "locked_baseline": None, "alt_hist": (), "baseline": None}}
 
 
 def _stats_for_src(stats, src):
@@ -77,12 +97,6 @@ def _stats_for_src(stats, src):
         if s == src:
             return v
     return {}
-
-
-def _baseline(cur):
-    """Per-SRC pad baseline = mean of ALT sampled while St:0, or None if none yet."""
-    valid = [a for a in cur.get("pad_window", ()) if a is not None]
-    return (sum(valid) / len(valid)) if valid else None
 
 
 def _agl(raw, base):
@@ -95,7 +109,7 @@ def view_model(snapshot, stats, open_flights, health, events=()):
     """Assemble the dashboard payload from an immutable LiveState snapshot,
     LinkStats.snapshot() (keyed by (SYS,SRC)), {src: flight_id}, a health dict, and
     recent advisory events. Time-since-last-packet + T+ are computed client-side from
-    received_at / met_s (no clock read here)."""
+    received_at / met_s (no clock read here). AGL uses the snapshot's locked/live baseline."""
     panels = []
     operator = None
     for src in sorted(snapshot):
@@ -104,7 +118,7 @@ def view_model(snapshot, stats, open_flights, health, events=()):
         rx = st.get("rx", 0)
         gaps = st.get("gaps", 0)
         loss = round(100.0 * gaps / (rx + gaps), 1) if (rx + gaps) else 0.0
-        base = _baseline(cur)
+        base = cur.get("baseline")
         if cur.get("callsign") and operator is None:
             operator = cur.get("callsign")
         panels.append({

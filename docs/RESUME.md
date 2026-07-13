@@ -191,6 +191,12 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   robust fallback; complements (doesn't replace) the `feat/rtc-boot-restore` software path. Frank
   to order the cell. **Epic 8 rider:** the handheld (Pi Zero 2 W) has **no `rtc0` at all**, so the
   software RTC-boot-restore (Option B) is the *only* option there — replicate it to the handheld.
+- **Manual flight-open/close from the live dashboard (a "log" button)** — mark flight boundaries
+  at the range when the 1 Hz launch detect misses. **Not a quick add** — the dashboard is a
+  read-only consumer and the ops journal is one-writer (CLI). Invariant-respecting design: a POST
+  endpoint on the ingest service force-opens/closes in the **live segmenter** and writes the
+  advisory to the **session log** (service-owned → one-writer preserved), thread-safe so it never
+  blocks RX. Live dashboard only (the public archive is static). Its own branch/epic.
 - **"KC3ZTQ RadioRocket V2" portfolio writeup** — full Stage-2 page in the site repo when the
   project wraps (or at first real flight). Raw material already in-repo: [ADR 0001](adr/0001-packet-format-v1.md)/
   [0002](adr/0002-ground-rx-driver-spidev.md), [agl-baseline-v2-audit](agl-baseline-v2-audit.md),

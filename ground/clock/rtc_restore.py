@@ -26,17 +26,34 @@ def parse_rtc(s):
         return None
 
 
+def extract_rtc_time(response: str):
+    """Pull the ISO timestamp out of pisugar-server's `get rtc_time` reply, e.g.
+    'rtc_time: 2026-07-13T15:58:33.000-04:00' -> the ISO string (for parse_rtc), or
+    None if the line is absent (e.g. 'Invalid request.')."""
+    if not response:
+        return None
+    for line in response.splitlines():
+        line = line.strip()
+        if line.startswith("rtc_time:"):
+            return line.split(":", 1)[1].strip() or None
+    return None
+
+
 def is_valid(dt) -> bool:
     """A sane wall-clock reading: present and within [2024, 2100] (rejects 1970/epoch)."""
     return dt is not None and _MIN_YEAR <= dt.year <= _MAX_YEAR
 
 
-def decide(rtc, sys, forward_threshold_s: float = _FORWARD_THRESHOLD_S):
+def decide(rtc, sys, forward_threshold_s: float = _FORWARD_THRESHOLD_S,
+           backstep_tolerance_s: float = _FORWARD_THRESHOLD_S):
     """Return (action, reason) — whether to set the system clock from the PiSugar RTC.
 
     Set only when the system clock is bogus, or grossly behind the RTC (the
-    timesyncd-floor case). NEVER step the clock backward: if the RTC is behind the
-    system clock (e.g. NTP already corrected it), leave it alone.
+    timesyncd-floor case); NEVER step the clock backward. The caller drops the trust
+    marker when we set, or when the RTC CONFIRMS the current clock within +/- tolerance
+    ("clock-already-current") — regardless of the sub-second sign, so an offline brief
+    power-cycle doesn't fail closed just because the RTC reads a hair behind. Only an RTC
+    more than backstep_tolerance behind is treated as stale (leave, do not attest).
     """
     if not is_valid(rtc):
         return ("leave", "rtc-invalid")
@@ -45,9 +62,9 @@ def decide(rtc, sys, forward_threshold_s: float = _FORWARD_THRESHOLD_S):
     delta = (rtc - sys).total_seconds()
     if delta > forward_threshold_s:
         return ("set", "sys-behind-rtc")                    # the floor case
-    if delta < 0:
-        return ("leave", "rtc-behind-sys-no-backstep")      # never step backward
-    return ("leave", "clock-already-current")
+    if delta < -backstep_tolerance_s:
+        return ("leave", "rtc-behind-sys-no-backstep")      # stale RTC — keep current clock
+    return ("leave", "clock-already-current")               # RTC confirms clock (either sign)
 
 
 def audit_event(rtc, sys_before, action, reason, received_at) -> dict:

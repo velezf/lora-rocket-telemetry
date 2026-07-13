@@ -1,0 +1,21 @@
+[Unit]
+Description=Restore system clock from the PiSugar RTC before ingest
+# The Pi 5 rtc0 has no coin cell (comes up 1970) and nothing else reads the PiSugar
+# RTC into the system clock; without this, ingest can open a session under the stale
+# systemd-timesyncd floor. Ordered after pisugar-server (owns the RTC) and — the only
+# essential edge — before apogee-ingest. NOT ordered before time-sync.target: that
+# risks an ordering cycle and NTP re-stepping the clock after us is harmless.
+After=pisugar-server.service
+Wants=pisugar-server.service
+Before=apogee-ingest.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/rocketman/lora-rocket-telemetry
+# Runs as root (settimeofday); reads the RTC via the pisugar-server API, sets the clock
+# only on a bogus/stale system clock, and drops /run/apogee-rtc-restored on success.
+ExecStart=/home/rocketman/gs-venv/bin/python -m ground.clock.restore_clock
+
+[Install]
+WantedBy=multi-user.target

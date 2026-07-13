@@ -11,7 +11,7 @@ import unittest
 from datetime import datetime, timezone
 
 from ground.clock.rtc_restore import (
-    parse_rtc, is_valid, decide, audit_event, clock_trustworthy,
+    parse_rtc, extract_rtc_time, is_valid, decide, audit_event, clock_trustworthy,
 )
 
 UTC = timezone.utc
@@ -32,6 +32,22 @@ class TestParse(unittest.TestCase):
 
     def test_empty_is_none(self):
         self.assertIsNone(parse_rtc(""))
+
+
+class TestExtractRtcTime(unittest.TestCase):
+    def test_extracts_iso_from_reply(self):
+        self.assertEqual(extract_rtc_time("rtc_time: 2026-07-13T15:58:33.000-04:00"),
+                         "2026-07-13T15:58:33.000-04:00")
+
+    def test_absent_line_is_none(self):
+        self.assertIsNone(extract_rtc_time("Invalid request."))
+
+    def test_empty_is_none(self):
+        self.assertIsNone(extract_rtc_time(""))
+
+    def test_round_trips_into_parse_rtc(self):
+        iso = extract_rtc_time("model: PiSugar 3\nrtc_time: 2026-07-13T15:58:33.000-04:00\n")
+        self.assertEqual(parse_rtc(iso), dt(2026, 7, 13, 19, 58, 33))
 
 
 class TestValid(unittest.TestCase):
@@ -64,10 +80,16 @@ class TestDecide(unittest.TestCase):
         self.assertEqual(action, "leave")
 
     def test_never_steps_clock_backward(self):
-        # sys is NTP-correct, rtc is stale-behind -> must NOT drag the clock back
+        # sys is NTP-correct, rtc is stale-behind (days) -> must NOT drag the clock back
         action, reason = decide(dt(2026, 7, 8, 21, 51), dt(2026, 7, 13, 19, 40))
         self.assertEqual(action, "leave")
         self.assertIn("back", reason)
+
+    def test_attests_when_rtc_within_tolerance_behind(self):
+        # RTC a few seconds BEHIND sys still CONFIRMS the clock -> clock-already-current
+        # (so the marker drops; an offline brief power-cycle must not fail closed).
+        action, reason = decide(dt(2026, 7, 13, 20, 0, 0), dt(2026, 7, 13, 20, 0, 5))
+        self.assertEqual((action, reason), ("leave", "clock-already-current"))
 
     def test_leaves_when_rtc_invalid(self):
         action, _ = decide(None, dt(2026, 7, 13, 20))

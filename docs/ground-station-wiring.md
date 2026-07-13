@@ -80,11 +80,36 @@ printf 'rtc_pi2rtc\n' | nc -q1 127.0.0.1 8423     # set the RTC from the (NTP-co
 # then set "auto_rtc_sync": true in /etc/pisugar-server/config.json and restart pisugar-server
 ```
 
-`apogee-ingest.service` orders after `pisugar-server.service` + `time-sync.target` (the
-latter *Wants*, best-effort — it never blocks the offline field case) and has an
-`ExecStartPre` that waits up to ~30 s for a sane year, so a session is never opened under
-a bogus clock. Inside the service, **silence/duration use `time.monotonic()` deltas**
-(immune to NTP/RTC steps); the wall `received_at` is only what's recorded. **Verify:**
-power off overnight, boot with no network — `date` should be correct.
+## Boot clock trust (RTC-boot-restore)
 
-The **Epic 8 handheld** (Pi Zero 2 W + PiSugar 3) replicates this same RTC config.
+The Pi 5 `rtc0` has **no coin cell** (comes up 1970) and nothing read the PiSugar RTC
+into the system clock, so `systemd-timesyncd` restored its *saved-clock floor* (= last
+shutdown) and the old year-only gate opened a **mis-dated session** — corrected only by
+NTP. Fixed by two pieces:
+
+- **`apogee-rtc-restore.service`** (oneshot, `After=pisugar-server`, `Before=apogee-ingest`)
+  reads the PiSugar RTC via the pisugar-server API and, only if the system clock is bogus
+  or grossly behind the RTC, sets it and drops **`/run/apogee-rtc-restored`**. Never steps
+  the clock backward; never writes the session/ops/index (audit → journald only).
+- **`apogee-ingest` `ExecStartPre` = `ground.clock.gate`** — **fail-closed**: proceeds only
+  if the clock is **NTP-synced OR RTC-restored (marker)**; a plausible-year floor alone no
+  longer passes.
+
+Inside the service, **silence/duration use `time.monotonic()` deltas** (immune to NTP/RTC
+steps); the wall `received_at` is only what's recorded.
+
+### Field escape hatch (dead RTC + no network)
+If ingest won't start (gate fail-closed) at the range, set the clock by hand and attest it:
+```bash
+cd /home/rocketman/lora-rocket-telemetry              # -m needs the repo on sys.path
+sudo date -s 'YYYY-MM-DD HH:MM:SS'                    # local time
+sudo /home/rocketman/gs-venv/bin/python -m ground.clock.attest_clock   # drops the marker
+sudo systemctl reset-failed apogee-ingest             # clear any start-limit state
+sudo systemctl start apogee-ingest
+```
+
+**Verify (closes the checklist item):** power off ≥30 min, boot with **Wi-Fi OFF** — `date`
+should be correct and the new session correctly named, with **no NTP**.
+
+The **Epic 8 handheld** (Pi Zero 2 W + PiSugar 3) has no `rtc0` either, so the software
+RTC-boot-restore is the *only* path there — replicate this config.

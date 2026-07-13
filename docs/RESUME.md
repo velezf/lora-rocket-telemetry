@@ -139,8 +139,15 @@ branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
 
 ## Physical tasks (Frank — not CC)
 
-- [ ] **Overnight no-network boot** — power off overnight, boot with Wi-Fi off, confirm
-      `date` is correct (validates the PiSugar RTC + `auto_rtc_sync`).
+- [ ] **Overnight/no-network cold boot — STILL OPEN, and now we know why it matters.** The
+      2026-07-13 boot (WITH Wi-Fi) exposed the field-time gap: at boot the kernel set the clock
+      from the Pi 5's `rtc0` → **1970** (no/dead coin cell), then `systemd-timesyncd` restored its
+      **saved-clock floor = last shutdown (Jul 08 21:51)**, and **nothing read the PiSugar RTC
+      into the system clock.** apogee-ingest's `year ≥ 2024` gate passed on that stale floor and
+      opened a **mis-dated session** (`session-20260709T015114Z`, really Jul 13); only **NTP**
+      (15:40:10) corrected it. Offline this would be silently wrong. Fix = `feat/rtc-boot-restore`
+      (Option B, below); **this task only closes on a Wi-Fi-OFF cold boot with a correct clock +
+      correctly-named session.**
 - [ ] **2.2 hotspot field test** — away from home Wi-Fi, confirm fallback to the iPhone hotspot.
 - [x] **Live shake test — done 2026-07-08** (see first flight below); hand-*jerk* peaked 2.2 g
       (missed the 1 Hz sample), a sustained **circular swing** hit 6.4 g and tripped it.
@@ -179,6 +186,11 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Backlog (not now)
 
+- **Pi 5 RTC coin cell (Option A)** — connect a battery to the Pi 5 RTC header (J5) so `rtc0`
+  keeps time and the kernel sets a correct clock at boot with no PiSugar/NTP. Cleanest, most
+  robust fallback; complements (doesn't replace) the `feat/rtc-boot-restore` software path. Frank
+  to order the cell. **Epic 8 rider:** the handheld (Pi Zero 2 W) has **no `rtc0` at all**, so the
+  software RTC-boot-restore (Option B) is the *only* option there — replicate it to the handheld.
 - **"KC3ZTQ RadioRocket V2" portfolio writeup** — full Stage-2 page in the site repo when the
   project wraps (or at first real flight). Raw material already in-repo: [ADR 0001](adr/0001-packet-format-v1.md)/
   [0002](adr/0002-ground-rx-driver-spidev.md), [agl-baseline-v2-audit](agl-baseline-v2-audit.md),

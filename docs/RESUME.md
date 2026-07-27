@@ -3,10 +3,11 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-08 end of night (Claude, on Mac + Pi 5 over SSH) — 4.4+4.6 deployed; F1 logged;
-AGL baseline v2 merged; 4.5 Stage-1 (data-only publisher + kernel) merged. **Next session:** the
-flights page mock is on pages-repo branch `feat/flights-section` awaiting Frank's review→merge→push;
-then Claude tags `v1.0-portfolio-genesis`. Pi 5 powered off for the night._
+_Last updated: 2026-07-27 (Claude, on Mac + Pi 5 over Ethernet) — RTC-boot-restore VERIFIED on a
+true Wi-Fi-OFF cold boot (overnight cold-boot physical task CLOSED; see Physical tasks). Branch
+`feat/rtc-boot-restore` still unmerged/unpushed, awaiting the `--no-ff` merge against the full
+159-test suite. Still parked from 2026-07-08: the flights page mock on pages-repo branch
+`feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
 ## Where we are
 
@@ -85,7 +86,7 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
 | 2 — Pi 5 ground-station bring-up | ✅ **2.1–2.6 done.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, 6 panel LEDs; **2.5 RX driver** in `ground/rx/`; **2.6 low-battery auto-shutdown** configured. **Remaining: 2.2 hotspot fallback field test** (physical); panel-LED *functions* unassigned (Epic 4). |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite 129 tests. **Remaining: 4.5 web publish only.** |
+| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite 159 tests (incl. `feat/rtc-boot-restore`). **Remaining: 4.5 web publish only.** |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -139,15 +140,26 @@ branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
 
 ## Physical tasks (Frank — not CC)
 
-- [ ] **Overnight/no-network cold boot — STILL OPEN, and now we know why it matters.** The
-      2026-07-13 boot (WITH Wi-Fi) exposed the field-time gap: at boot the kernel set the clock
-      from the Pi 5's `rtc0` → **1970** (no/dead coin cell), then `systemd-timesyncd` restored its
-      **saved-clock floor = last shutdown (Jul 08 21:51)**, and **nothing read the PiSugar RTC
-      into the system clock.** apogee-ingest's `year ≥ 2024` gate passed on that stale floor and
-      opened a **mis-dated session** (`session-20260709T015114Z`, really Jul 13); only **NTP**
-      (15:40:10) corrected it. Offline this would be silently wrong. Fix = `feat/rtc-boot-restore`
-      (Option B, below); **this task only closes on a Wi-Fi-OFF cold boot with a correct clock +
-      correctly-named session.**
+- [x] **Overnight/no-network cold boot — CLOSED 2026-07-27** (`feat/rtc-boot-restore`, Option B).
+      _Diagnosis (2026-07-13 boot, WITH Wi-Fi):_ at boot the kernel set the clock from the Pi 5's
+      `rtc0` → **1970** (no/dead coin cell), then `systemd-timesyncd` restored its **saved-clock
+      floor = last shutdown (Jul 08 21:51)**, and **nothing read the PiSugar RTC into the system
+      clock.** apogee-ingest's `year ≥ 2024` gate passed on that stale floor and opened a
+      **mis-dated session** (`session-20260709T015114Z`, really Jul 13); only **NTP** (15:40:10)
+      corrected it — offline it would have been silently wrong.
+      _Verification (2026-07-27, true Wi-Fi-OFF cold boot, **no network at boot** — Ethernet
+      physically unplugged until +15 min so no NTP could sneak in):_ **PASS.** The floor bug
+      reproduced exactly — the system came up at the timesyncd floor (`sys_before` = `14:53:50Z`,
+      ~62 min stale); `apogee-rtc-restore` read the PiSugar RTC (`11:56:09-04:00`) and `decide()`
+      returned **`action=set / reason=sys-behind-rtc`** (Δ ≈ 3739 s ≫ 120 s `_FORWARD_THRESHOLD_S`),
+      stepped the clock, and dropped `/run/apogee-rtc-restored` — **before** `apogee-ingest` started
+      (`11:56:09` vs `11:56:16`). Ingest's fail-closed gate then passed **on the marker, not NTP**
+      (first NTP sync was `12:11:13`, ~15 min later when the cable went in — it postdates both the
+      clock-set and the session-open, proving the link was dead at boot) and opened a
+      **correctly-named session** `session-20260727T155616Z-8059ca.jsonl`.
+      _Criterion (1) — PiSugar RTC hold — satisfied free by the hiatus:_ the RTC kept correct
+      wall-clock across a **~13-day fully-powered-off** span at 69 % with no drain (read back
+      `2026-07-27T10:45:47-04:00` on power-up); the 30-min hold test need not be re-run.
 - [ ] **2.2 hotspot field test** — away from home Wi-Fi, confirm fallback to the iPhone hotspot.
 - [x] **Live shake test — done 2026-07-08** (see first flight below); hand-*jerk* peaked 2.2 g
       (missed the 1 Hz sample), a sustained **circular swing** hit 6.4 g and tripped it.

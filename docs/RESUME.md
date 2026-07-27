@@ -203,6 +203,14 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Backlog (not now)
 
+- **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
+  (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
+  but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same
+  "right in the docs, wrong on the machine, found under stress" failure class the escape-hatch
+  cwd bug was. Cheap fix: either a **verify-installed-units-match-repo check** (diff installed
+  `apogee-*.service` against the repo copies; run at deploy/boot or as a test) **or** a single
+  sanctioned `install-units.sh` (copy + `daemon-reload`). Not implemented — pick one when Epic 8
+  needs it.
 - **Pi 5 RTC coin cell (Option A)** — connect a battery to the Pi 5 RTC header (J5) so `rtc0`
   keeps time and the kernel sets a correct clock at boot with no PiSugar/NTP. Cleanest, most
   robust fallback; complements (doesn't replace) the `feat/rtc-boot-restore` software path. Frank

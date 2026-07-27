@@ -107,6 +107,11 @@ branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
   Human-readable index: [`docs/telemetry-dictionary.md`](telemetry-dictionary.md).
 - **Ground RX = raw spidev + lgpio** ([ADR 0002](adr/0002-ground-rx-driver-spidev.md)),
   Blinka rejected on Pi 5.
+- **Field-time integrity** ([ADR 0003](adr/0003-rtc-boot-restore-clock-gate.md)):
+  `apogee-rtc-restore` oneshot reads the PiSugar RTC into the system clock at boot
+  (`Before=apogee-ingest`); ingest's clock gate is **fail-closed** — `year≥2024 AND (NTP OR
+  RTC-restore marker)`, so a plausible-year timesyncd floor alone no longer passes. Operator
+  escape hatch = `attest_clock`. Verified on a Wi-Fi-OFF cold boot (2026-07-27).
 - **Ground service (Epic 4):** one radio-owning process fans out
   `Observation(received_at, rssi, packet)` to consumers — **time is injected, no consumer
   reads a clock.** Three files, one writer each: session JSONL (service), ops journal (CLI),

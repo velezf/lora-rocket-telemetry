@@ -226,6 +226,11 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Notes / gotchas
 
+- **Wake-on-charge = rising-edge, not presence:** `auto_power_on: true` (PiSugar, Epic 2.6's
+  complement) boots the box when power is **(re)connected**, not when power is merely present —
+  so `poweroff` with the charger plugged **stays off**, and **unplug→replug wakes it** (both
+  verified 2026-07-27). If it wakes unexpectedly, suspect a power reconnect, not a timer. Setup +
+  semantics: [`ground-station-wiring.md`](ground-station-wiring.md).
 - **Real-RF golden fixture:** `ground/flights/tests/fixtures/f1_*.jsonl` is the F1 shake-test
   slice; `test_f1_golden.py` guards decode→segment→derive against real bytes. **Treat it like the
   ADR golden vector** — a change that alters F1's decoded fields or index entry is a contract break.

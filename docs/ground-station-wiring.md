@@ -113,3 +113,25 @@ should be correct and the new session correctly named, with **no NTP**.
 
 The **Epic 8 handheld** (Pi Zero 2 W + PiSugar 3) has no `rtc0` either, so the software
 RTC-boot-restore is the *only* path there — replicate this config.
+
+## Power — auto-shutdown + wake-on-charge (PiSugar)
+
+The PiSugar 3 governs power both ways, in `/etc/pisugar-server/config.json` (restart
+`pisugar-server` after changes):
+
+- **Low-battery auto-shutdown (Epic 2.6):** `auto_shutdown_level: 5`, `auto_shutdown_delay: 30`
+  — graceful shutdown at 5 % after 30 s.
+- **Wake-on-charge:** `auto_power_on: true` — the box auto-boots when power is **(re)connected**.
+
+**Rising-edge semantics (the fact to remember in six months):** `auto_power_on` fires on the
+**transition** of external power being connected, *not* on power merely being present. Therefore:
+
+- `poweroff` with the charger **already plugged stays off** — no new connection edge. Verified
+  2026-07-27: powered off charger-connected, stayed dark >100 s, no bounce. **`poweroff` means
+  off**; there is no "boots in the bag" footgun unless the charger is unplugged/replugged.
+- **Unplug→replug** (or connecting power to a dead pack) **boots it** — verified 2026-07-27 (woke
+  on the replug rising edge). This is the field-recovery complement to auto-shutdown: a pack that
+  shut down at 5 % comes back by reconnecting power, no button press.
+
+If the box ever wakes unexpectedly, suspect a **power reconnect** (loose barrel jack, charger
+re-seating), not a timer.

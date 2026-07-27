@@ -32,8 +32,9 @@ def main(timeout_s: int = 30) -> int:
             return 0
         time.sleep(1)
     print("clock-gate: UNTRUSTED — no NTP sync and no RTC-restore marker; refusing to "
-          "open a session under a stale clock. Field escape hatch: set the clock then "
-          "run `python -m ground.clock.attest_clock`, then start apogee-ingest.",
+          "open a session under a stale clock. Field escape hatch: set the clock "
+          "(sudo date -s ...), then `sudo systemctl start apogee-attest`, then "
+          "`sudo systemctl start apogee-ingest`.",
           file=sys.stderr)
     return 1
 

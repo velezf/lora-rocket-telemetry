@@ -1,0 +1,14 @@
+[Unit]
+Description=Field escape hatch — operator attests the system clock (drops the ingest trust marker)
+# Operator-invoked, NEVER at boot (no [Install]/WantedBy). After a dead RTC + no network, the
+# operator sets the clock by hand (sudo date -s ...), then `systemctl start apogee-attest` drops
+# /run/apogee-rtc-restored so apogee-ingest's fail-closed gate trusts the clock. Carries the SAME
+# WorkingDirectory as apogee-rtc-restore so `python -m ground.clock.attest_clock` can never be
+# invoked from the wrong directory (the bench-found cwd-dependence of the bare invocation).
+
+[Service]
+Type=oneshot
+# NOT RemainAfterExit: each `systemctl start` must re-run ExecStart, so the operator can re-attest
+# after re-setting the clock. Runs as root (writes /run and calls settimeofday-adjacent tooling).
+WorkingDirectory=/home/rocketman/lora-rocket-telemetry
+ExecStart=/home/rocketman/gs-venv/bin/python -m ground.clock.attest_clock

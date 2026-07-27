@@ -49,14 +49,21 @@ edge — `Before=apogee-ingest.service`. It reads the PiSugar RTC via the `pisug
   arrives or the operator attests) without tripping start-limit lockout.
 
 **3. Operator escape hatch.** Dead RTC *and* no network would otherwise mean no ingest = a lost
-flight. `ground/clock/attest_clock.py` lets the operator vouch for a hand-set clock — the documented
-3-command range procedure:
+flight. `ground/clock/attest_clock.py` lets the operator vouch for a hand-set clock. It is invoked
+via the **`apogee-attest.service` oneshot** (same `WorkingDirectory=` as the restore unit), so the
+range procedure is three consistent, **cwd-independent** commands:
 
 ```
-sudo date -s '<YYYY-MM-DD HH:MM:SS>'                                   # set from a watch/phone
-sudo /home/rocketman/gs-venv/bin/python -m ground.clock.attest_clock  # drops the trust marker
-sudo systemctl start apogee-ingest                                    # gate now passes on the marker
+sudo date -s '<YYYY-MM-DD HH:MM:SS>'    # set from a watch/phone
+sudo systemctl start apogee-attest      # drops the trust marker (from the repo root, always)
+sudo systemctl start apogee-ingest      # gate now passes on the marker
 ```
+
+The bare `cd <repo> && python -m ground.clock.attest_clock` invocation is retained as **break-glass
+only** (if the unit is unavailable) — it MUST run from the repo root, else `ground.clock` is not
+importable (bench-found 2026-07-27). **Deploy:** install `apogee-attest.service` to
+`/etc/systemd/system/` + `systemctl daemon-reload`; recreate on an SD rebuild alongside `gs-venv`
+and the other units.
 
 **Ordering rationale.** `Before=apogee-ingest` is the only edge that matters. We deliberately do
 **not** order before `time-sync.target`: that risks an ordering cycle, and NTP re-stepping the clock

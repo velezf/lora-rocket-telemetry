@@ -3,22 +3,11 @@
 The ingest gate is fail-closed: a dead RTC + no network at the range would otherwise
 mean no ingest = lost flight. After the operator has set the clock by hand, this drops
 the `/run/apogee-rtc-restored` marker so the gate trusts the clock and apogee-ingest
-will start. Audit to STDOUT (journald) only.
+will start. Audit to STDOUT (journald) only. Normally invoked via the apogee-attest.service
+oneshot (carries WorkingDirectory=<repo>, so this module is always importable).
 
-Field procedure (primary) — invoked via the apogee-attest.service oneshot, which carries
-WorkingDirectory=<repo> so this module is always importable (never cwd-dependent):
-
-    sudo date -s '<YYYY-MM-DD HH:MM:SS>'
-    sudo systemctl start apogee-attest
-    sudo systemctl start apogee-ingest
-
-Break-glass only (if the apogee-attest unit is unavailable) — MUST run from the repo root,
-else `python -m ground.clock.attest_clock` is not importable:
-
-    sudo date -s '<YYYY-MM-DD HH:MM:SS>'
-    cd /home/rocketman/lora-rocket-telemetry && \\
-        sudo /home/rocketman/gs-venv/bin/python -m ground.clock.attest_clock
-    sudo systemctl start apogee-ingest
+The operator procedure lives in ONE place — see docs/adr/0003-rtc-boot-restore-clock-gate.md
+("Operator escape hatch"). Do not restate the commands here; that copy is canonical.
 """
 import json
 import sys

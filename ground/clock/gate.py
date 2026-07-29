@@ -32,9 +32,9 @@ def main(timeout_s: int = 30) -> int:
             return 0
         time.sleep(1)
     print("clock-gate: UNTRUSTED — no NTP sync and no RTC-restore marker; refusing to "
-          "open a session under a stale clock. Field escape hatch: set the clock "
-          "(sudo date -s ...), then `sudo systemctl start apogee-attest`, then "
-          "`sudo systemctl start apogee-ingest`.",
+          "open a session under a stale clock. Field escape hatch (set the clock, then "
+          "`systemctl start apogee-attest`, then `apogee-ingest`) — see the procedure in "
+          "docs/adr/0003-rtc-boot-restore-clock-gate.md.",
           file=sys.stderr)
     return 1
 

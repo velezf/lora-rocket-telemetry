@@ -99,14 +99,10 @@ Inside the service, **silence/duration use `time.monotonic()` deltas** (immune t
 steps); the wall `received_at` is only what's recorded.
 
 ### Field escape hatch (dead RTC + no network)
-If ingest won't start (gate fail-closed) at the range, set the clock by hand and attest it:
-```bash
-cd /home/rocketman/lora-rocket-telemetry              # -m needs the repo on sys.path
-sudo date -s 'YYYY-MM-DD HH:MM:SS'                    # local time
-sudo /home/rocketman/gs-venv/bin/python -m ground.clock.attest_clock   # drops the marker
-sudo systemctl reset-failed apogee-ingest             # clear any start-limit state
-sudo systemctl start apogee-ingest
-```
+If ingest won't start (gate fail-closed) at the range, set the clock by hand and attest it via
+the `apogee-attest` oneshot. **The procedure is canonical in
+[ADR 0003](adr/0003-rtc-boot-restore-clock-gate.md) ("Operator escape hatch")** — not restated
+here so the two can't drift.
 
 **Verify (closes the checklist item):** power off ≥30 min, boot with **Wi-Fi OFF** — `date`
 should be correct and the new session correctly named, with **no NTP**.

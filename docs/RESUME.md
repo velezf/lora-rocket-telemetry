@@ -226,6 +226,9 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Notes / gotchas
 
+- **Bench-artifact sessions:** session logs produced by bench tests (not flights) are registered
+  in [`docs/bench-sessions.md`](bench-sessions.md) — the canonical, append-only provenance list so
+  they aren't mistaken for real telemetry. Add a row per bench session; don't restate elsewhere.
 - **Wake-on-charge = rising-edge, not presence:** `auto_power_on: true` (PiSugar, Epic 2.6's
   complement) boots the box when power is **(re)connected**, not when power is merely present —
   so `poweroff` with the charger plugged **stays off**, and **unplug→replug wakes it** (both

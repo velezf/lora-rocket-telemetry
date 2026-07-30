@@ -205,18 +205,21 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Backlog (not now)
 
-- **`feat/oled-reinit-recovery`** — luma sends the SSD1306 init sequence **only at service
-  startup**, then only pushes framebuffer bytes. A power-cycled OLED (connector reseats in
-  transit) resets to display-OFF/charge-pump-OFF but **still ACKs on the bus**, so luma keeps
-  writing pixels to a dark panel — **the OLED blanks for the whole launch, silently, no error
-  anywhere** (found 2026-07-30: a rewire mid-run blanked it; only a physical restart re-inited
-  it). Cheap self-heals: (a) **periodic re-init** (re-send the init sequence every N seconds —
-  dead simple, always recovers, costs a few I²C writes); (b) **re-init on I²C error** (only
-  fires on a *detected* fault — but a reset SSD1306 throws no write error, so this misses this
-  exact case); (c) a **display heartbeat** (read back a register / detect blanking, re-init on
-  mismatch — most correct, most code). **Recommend (a)** — a low-frequency unconditional re-init
-  is the smallest change that actually covers the silent-blank case (b) can't see. **Same class
-  of bug for the Epic 8 handheld OLED** — replicate the fix there.
+- **`feat/oled-heartbeat`** — the OLED goes silently blank in two distinct ways, both fixed by
+  **one periodic render loop** (redraw every 1–2 s instead of the current render-on-packet-only):
+  1. **No idle page** — `_oled_update` (service.py) renders *only* on an observation callback, so
+     with no sled transmitting the panel sits at luma's cleared-black init state = looks dead
+     (found 2026-07-30: OLED "dark" was really *no content* on a quiet pad; raw white-fill + a
+     luma text frame proved the whole HW/luma path good — genuine SSD1306, charge-pump lit it).
+     Fix: a startup + periodic **idle/pad frame** ("apogee-gs ready / waiting SRC:1 / RSSI --").
+  2. **Silent reset-blank** — luma sends the init sequence only at startup; a power-cycled OLED
+     (connector reseats in transit) resets to display-OFF but **still ACKs**, so luma writes
+     pixels to a dark panel, no error anywhere. Fix: the same loop **re-sends the init** each
+     redraw (unconditional periodic re-init — covers the case an on-I²C-error check can't see,
+     since a reset SSD1306 throws nothing).
+  A periodic redraw-with-reinit is the single smallest change covering both. **Same bug class for
+  the Epic 8 handheld OLED** — replicate there. (Merges the earlier `oled-reinit-recovery` +
+  `oled-idle-page` notes — they converge on one heartbeat loop.)
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

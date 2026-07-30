@@ -21,7 +21,9 @@ confirmed against the live V1 sled; OLED + PiSugar on I²C1).
 | Reset  | RST       | **22**      | GPIO 25  | active-low |
 
 - **Unconnected:** `EN`, `G0` (DIO0), `G1`–`G5`. The driver **polls** `RegIrqFlags` — no DIO
-  interrupt lines are wired.
+  interrupt lines are wired. **`DIO0` is deliberately NOT wired** — in particular nothing is on
+  **phys pin 15 / GPIO22** (don't confuse it with the wired `RST` on phys pin 22 / GPIO25). A
+  rebuild or the Epic 8 handheld does **not** need a DIO0 wire; the polling driver never reads it.
 - **SPI baudrate: 1 MHz** in code (breakout reliability).
 - **CS/RST = CE1 / D25** to match the handheld bonnet convention for code parity.
 - Verified: `RegVersion = 0x12` (SX1276); live RX from the V1 sled at 434.0 MHz,

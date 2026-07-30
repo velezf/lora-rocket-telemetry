@@ -205,6 +205,18 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Backlog (not now)
 
+- **`feat/oled-reinit-recovery`** — luma sends the SSD1306 init sequence **only at service
+  startup**, then only pushes framebuffer bytes. A power-cycled OLED (connector reseats in
+  transit) resets to display-OFF/charge-pump-OFF but **still ACKs on the bus**, so luma keeps
+  writing pixels to a dark panel — **the OLED blanks for the whole launch, silently, no error
+  anywhere** (found 2026-07-30: a rewire mid-run blanked it; only a physical restart re-inited
+  it). Cheap self-heals: (a) **periodic re-init** (re-send the init sequence every N seconds —
+  dead simple, always recovers, costs a few I²C writes); (b) **re-init on I²C error** (only
+  fires on a *detected* fault — but a reset SSD1306 throws no write error, so this misses this
+  exact case); (c) a **display heartbeat** (read back a register / detect blanking, re-init on
+  mismatch — most correct, most code). **Recommend (a)** — a low-frequency unconditional re-init
+  is the smallest change that actually covers the silent-blank case (b) can't see. **Same class
+  of bug for the Epic 8 handheld OLED** — replicate the fix there.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

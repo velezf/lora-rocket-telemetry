@@ -80,11 +80,54 @@ printf 'rtc_pi2rtc\n' | nc -q1 127.0.0.1 8423     # set the RTC from the (NTP-co
 # then set "auto_rtc_sync": true in /etc/pisugar-server/config.json and restart pisugar-server
 ```
 
-`apogee-ingest.service` orders after `pisugar-server.service` + `time-sync.target` (the
-latter *Wants*, best-effort — it never blocks the offline field case) and has an
-`ExecStartPre` that waits up to ~30 s for a sane year, so a session is never opened under
-a bogus clock. Inside the service, **silence/duration use `time.monotonic()` deltas**
-(immune to NTP/RTC steps); the wall `received_at` is only what's recorded. **Verify:**
-power off overnight, boot with no network — `date` should be correct.
+## Boot clock trust (RTC-boot-restore)
 
-The **Epic 8 handheld** (Pi Zero 2 W + PiSugar 3) replicates this same RTC config.
+The Pi 5 `rtc0` has **no coin cell** (comes up 1970) and nothing read the PiSugar RTC
+into the system clock, so `systemd-timesyncd` restored its *saved-clock floor* (= last
+shutdown) and the old year-only gate opened a **mis-dated session** — corrected only by
+NTP. Fixed by two pieces:
+
+- **`apogee-rtc-restore.service`** (oneshot, `After=pisugar-server`, `Before=apogee-ingest`)
+  reads the PiSugar RTC via the pisugar-server API and, only if the system clock is bogus
+  or grossly behind the RTC, sets it and drops **`/run/apogee-rtc-restored`**. Never steps
+  the clock backward; never writes the session/ops/index (audit → journald only).
+- **`apogee-ingest` `ExecStartPre` = `ground.clock.gate`** — **fail-closed**: proceeds only
+  if the clock is **NTP-synced OR RTC-restored (marker)**; a plausible-year floor alone no
+  longer passes.
+
+Inside the service, **silence/duration use `time.monotonic()` deltas** (immune to NTP/RTC
+steps); the wall `received_at` is only what's recorded.
+
+### Field escape hatch (dead RTC + no network)
+If ingest won't start (gate fail-closed) at the range, set the clock by hand and attest it via
+the `apogee-attest` oneshot. **The procedure is canonical in
+[ADR 0003](adr/0003-rtc-boot-restore-clock-gate.md) ("Operator escape hatch")** — not restated
+here so the two can't drift.
+
+**Verify (closes the checklist item):** power off ≥30 min, boot with **Wi-Fi OFF** — `date`
+should be correct and the new session correctly named, with **no NTP**.
+
+The **Epic 8 handheld** (Pi Zero 2 W + PiSugar 3) has no `rtc0` either, so the software
+RTC-boot-restore is the *only* path there — replicate this config.
+
+## Power — auto-shutdown + wake-on-charge (PiSugar)
+
+The PiSugar 3 governs power both ways, in `/etc/pisugar-server/config.json` (restart
+`pisugar-server` after changes):
+
+- **Low-battery auto-shutdown (Epic 2.6):** `auto_shutdown_level: 5`, `auto_shutdown_delay: 30`
+  — graceful shutdown at 5 % after 30 s.
+- **Wake-on-charge:** `auto_power_on: true` — the box auto-boots when power is **(re)connected**.
+
+**Rising-edge semantics (the fact to remember in six months):** `auto_power_on` fires on the
+**transition** of external power being connected, *not* on power merely being present. Therefore:
+
+- `poweroff` with the charger **already plugged stays off** — no new connection edge. Verified
+  2026-07-27: powered off charger-connected, stayed dark >100 s, no bounce. **`poweroff` means
+  off**; there is no "boots in the bag" footgun unless the charger is unplugged/replugged.
+- **Unplug→replug** (or connecting power to a dead pack) **boots it** — verified 2026-07-27 (woke
+  on the replug rising edge). This is the field-recovery complement to auto-shutdown: a pack that
+  shut down at 5 % comes back by reconnecting power, no button press.
+
+If the box ever wakes unexpectedly, suspect a **power reconnect** (loose barrel jack, charger
+re-seating), not a timer.

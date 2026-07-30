@@ -211,6 +211,10 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   `apogee-*.service` against the repo copies; run at deploy/boot or as a test) **or** a single
   sanctioned `install-units.sh` (copy + `daemon-reload`). Not implemented — pick one when Epic 8
   needs it.
+- **Stale-branch cleanup pass** — the repo carries ~24 merged/dead local branches (`feat/*`
+  from Epics 1–4 already in `main`, plus `worktree-agent-*` merge-artifact branches). Prune the
+  ones fully contained in `main` so `git branch` reflects only live work. Not urgent; do a sweep
+  when convenient. (Don't delete anything not merged — verify `git branch --merged main` first.)
 - **Pi 5 RTC coin cell (Option A)** — connect a battery to the Pi 5 RTC header (J5) so `rtc0`
   keeps time and the kernel sets a correct clock at boot with no PiSugar/NTP. Cleanest, most
   robust fallback; complements (doesn't replace) the `feat/rtc-boot-restore` software path. Frank

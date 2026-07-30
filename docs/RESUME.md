@@ -3,10 +3,12 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-27 (Claude, on Mac + Pi 5 over Ethernet) — RTC-boot-restore VERIFIED on a
-true Wi-Fi-OFF cold boot (overnight cold-boot physical task CLOSED; see Physical tasks). Branch
-`feat/rtc-boot-restore` still unmerged/unpushed, awaiting the `--no-ff` merge against the full
-159-test suite. Still parked from 2026-07-08: the flights page mock on pages-repo branch
+_Last updated: 2026-07-30 (Claude, on Mac + Pi 5 over Ethernet). Since 2026-07-27: RTC-boot-restore
+merged + pushed (ADR 0003); **wake-on-charge** (`auto_power_on`) enabled; **graceful button
+off-switch** validated (USB-C double-tap → clean `service_stop`; both PiSugar buttons close the log
+cleanly); **OLED rewire verified** (the "dark" was a no-idle-page firmware gap, not hardware).
+Designed (not built): `feat/oled-heartbeat` layout redesign + `feat/panel-leds` (architecture
+locked) — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
 ## Where we are
@@ -220,6 +222,33 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   A periodic redraw-with-reinit is the single smallest change covering both. **Same bug class for
   the Epic 8 handheld OLED** — replicate there. (Merges the earlier `oled-reinit-recovery` +
   `oled-idle-page` notes — they converge on one heartbeat loop.)
+  **Layout redesign is DESIGNED** (2026-07-30, design-only): number-dominant live page — 28px
+  hero altitude AGL, inverted state band + ▲/▼ glyph, RSSI icon+dBm, thin full-width trend strip
+  (combine, number wins on cramping); three pages (idle/live/summary) sharing a common header;
+  pad-only diagnostics (baseline) live on the idle page only. **Fonts:** no TTF on the Pi and a
+  system font breaks golden-image tests (host vs Pi diverge), so **hand-draw the hero digits**
+  (~12 glyphs, bold, pure) + **commit one bold pixel TTF** to `ground/oled/fonts/` for small text.
+  Render = pure `render(snapshot)->PIL.Image`, golden-image tested. Burn-in: **1 px frame-shift
+  every ~30–60 s + dimmed idle contrast** (never blank — blank re-creates "dark looks broken").
+- **`feat/panel-leds`** — six front-panel LEDs (GPIO 5/6/13 green, 26 red, 12/16 blue) as an
+  operator-glance surface. **Architecture LOCKED** (2026-07-30): a **supervisor** (`apogee-panel`
+  systemd unit, independent of ingest) **owns all six GPIO lines**; ingest is only a *state
+  source* — it publishes `/run/apogee-ingest-state.json` (**one writer**). Fail-closed by default:
+  no fresh ingest state → supervisor drives the "down" pattern. This is the fix for the
+  lying-panel problem — an ingest crash mid-flight must not leave the flight LED lit; the
+  supervisor (not ingest) owns it and clears it on stale heartbeat. **State file:** heartbeat
+  `ts` written on a **1 Hz timer independent of traffic** (NOT event-driven — the exact
+  `_oled_update` bug), with `last_rx_ts` a **separate** field; **stale threshold 3 s** (tolerate
+  2 missed ticks, avoid flap); **atomic temp+rename**; parse-fail = retain last-good ts (age out,
+  don't flip). **Assignment:** RED (supervisor) = NOT RECORDING (ingest down / gate refused /
+  write failing), slow-pulse=shutdown, fast=low-batt; GREEN×3 = alive-heartbeat / RX-blink /
+  flight-open (solid, adjacent to RED as the recording-status pair); BLUE#1 = clock provenance
+  (solid=RTC, blink=attested, off=unknown); BLUE#2 = RF trouble (foreign OR CRC-climbing=fast).
+  **Blink vocab** off/slow/fast/solid + heartbeat; **power-on lamp test** sweeps all six (dead-LED
+  detection + resolves the physical L→R order). **Pure `led_states(state)->{led:BlinkState}` core,
+  host-tested** like the clock work; thin Pi-only GPIO shell. **Doc bug to fix in this branch:**
+  the wiring doc's LED physical order is reversed — real panel is 🔵🔵🔴🟢🟢🟢 (confirmed 2026-07-30),
+  doc says 🟢🟢🟢🔴🔵🔵; the lamp test pins exact per-position GPIOs, then correct the doc.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

@@ -133,3 +133,30 @@ The PiSugar 3 governs power both ways, in `/etc/pisugar-server/config.json` (res
 
 If the box ever wakes unexpectedly, suspect a **power reconnect** (loose barrel jack, charger
 re-seating), not a timer.
+
+### Graceful shutdown — the button off-switch
+
+Headless field off-switch so a shutdown closes the append-only session log cleanly (a raw power
+cut can truncate the last JSONL line). Config in `/etc/pisugar-server/config.json`:
+
+- `double_tap_enable: true`, `double_tap_shell: "/usr/bin/systemctl poweroff"` — a **double-tap**
+  runs an orderly shutdown (ingest SIGTERM → writes `service_stop` + drains the queue → then
+  `pisugar-poweroff` cuts the rails). Full path to `systemctl` (no PATH-dependence).
+- `soft_poweroff: true`, `soft_poweroff_shell: "/usr/bin/systemctl poweroff"` — the same graceful
+  command backs the **low-battery** path too (one definition of "graceful off", two triggers).
+- `single_tap_enable: false`, `long_tap_enable: false` — only double-tap acts (anti-mistouch).
+- `anti_mistouch: true` (runtime default) — guards against a stray single touch.
+
+**The PiSugar 3 has two physical buttons:** the **tap-gesture button on the USB-C side** (the one
+the `double_tap` config drives) and a **power button on the micro-USB side**. Use the USB-C-side
+double-tap as the normal off-switch.
+
+**Validated 2026-07-30 (both paths close the log cleanly):**
+- **USB-C double-tap** → session `…266cc9` ended with a valid-JSON `service_stop` as its final
+  record. No truncation. Confirms the SIGTERM drain completes before `pisugar-poweroff`'s 3 s
+  countdown (services stop *before* `shutdown.target` pulls the rail-cut — no race).
+- **micro-USB button, ~5 s hold** → session `…3915db` **also** closed cleanly (`service_stop`
+  present). Surprising for a button described as "hard shutoff" — it behaves as an orderly
+  power-key signal, **not** a raw truncating cut, at least at ~5 s. A genuine truncating cut would
+  need a power pull / much longer hold — **not established, not chased** (the graceful path is
+  proven, which is what matters). Do not assume this button truncates; the evidence says it didn't.

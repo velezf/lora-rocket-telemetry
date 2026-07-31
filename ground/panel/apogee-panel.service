@@ -1,0 +1,19 @@
+[Unit]
+Description=Apogee front-panel LED supervisor (owns all six LEDs; fail-closed)
+# Deliberately INDEPENDENT of apogee-ingest — it must run even when ingest is down or its
+# clock gate is refusing, so RED ("not recording") is visible without a screen. That is the
+# whole point: the most dangerous state (recording nothing) must show on the panel.
+After=multi-user.target
+
+[Service]
+Type=simple
+User=rocketman
+WorkingDirectory=/home/rocketman/lora-rocket-telemetry
+ExecStart=/home/rocketman/gs-venv/bin/python -m ground.panel.run_panel
+# Restart=always: a dead supervisor freezes every LED in its last state (a lying panel one
+# level up). Self-heal fast; a frozen G_ALIVE (never a valid blink) also flags a wedged one.
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

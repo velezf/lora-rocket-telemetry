@@ -30,7 +30,11 @@ try:
 except ImportError:
     sys.exit("gpiozero not found -- install with: sudo apt install python3-gpiozero")
 
-DEFAULT_PINS = [5, 6, 13, 26, 12, 16]  # LED1..LED6 in physical panel order
+# LED1..LED6 in physical panel order (left->right), corrected 2026-07-31 — the original
+# bring-up map was fully reversed. Canonical copy: LED_GPIO/lamp_test_order in
+# ground/panel/leds.py (host-tested); this is a standalone bring-up tool, kept independent
+# of the panel package on purpose so it still works when that package is broken.
+DEFAULT_PINS = [16, 12, 26, 13, 6, 5]
 
 
 def parse_pins(argv):

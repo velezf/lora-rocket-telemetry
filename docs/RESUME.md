@@ -103,7 +103,7 @@ python3 -m venv .venv-test && .venv-test/bin/python -m pip install pytest
 **Rebuild implication:** a fresh Mac (or a wiped repo) has **no** pytest anywhere until this is
 recreated — on 2026-07-31 pytest was absent from `.venv`, system `python3`, Homebrew, pyenv,
 *and* the Pi's `~/gs-venv`, which blocked TDD outright until it was rebuilt. The ground suite is
-pure/host-only, so it does **not** need the Pi. Current: **218 tests green**.
+pure/host-only, so it does **not** need the Pi. Current: **221 tests green**.
 
 ## Wired peripherals (bench-verified 2026-07-07)
 
@@ -112,7 +112,7 @@ pure/host-only, so it does **not** need the Pi. Current: **218 tests green**.
 | RFM96 LoRa radio | SPI0 | **CE1** (`/dev/spidev0.1`, pin 26); RESET GPIO25 (pin 22) | `RegVersion 0x12`. **Not CE0.** |
 | OLED (Adafruit 938, SSD1306 128×64) | I²C-1 | `0x3d` | driven via `~/gs-venv` + **`luma.oled`** |
 | PiSugar 3 Plus UPS | I²C-1 | `0x57` batt, `0x68` RTC | `pisugar-server`; auto-shutdown at 5% / 30 s |
-| Front-panel LEDs ×6 | GPIO | `5,6,13` grn, `26` red, `12,16` blu — physical **L→R: 🔵🔵🔴🟢🟢🟢** (confirmed 2026-07-30) | active-high; bring-up via `ground/tools/led_check.py`. Per-position GPIO **not yet pinned** — the lamp sweep resolves it |
+| Front-panel LEDs ×6 | GPIO | physical **L→R: `16,12,26,13,6,5`** = 🔵🔵🔴🟢🟢🟢 (per-position, single-LED probed 2026-07-31) | active-high; bring-up via `ground/tools/led_check.py`. Canonical map: `ground/panel/leds.py` (host-tested) |
 | Sled 9-DoF (bench, Epic 5.1) | I²C | LSM6DSOX `0x6a`, LIS3MDL `0x1c` | on the sled's STEMMA QT bus alongside BMP390 `0x77` / ADXL375 `0x53` |
 
 **Native LoRa RX** = the repo's `ground/rx/` **SX127x driver** (raw `spidev`+`lgpio`,
@@ -154,9 +154,10 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 lamp-sweep order/plan, the G_ALIVE-never-solid invariant, the fail-safe ingest heartbeat
 publisher, its wiring into the RX loop, severity captures, and the pure supervisor logic
 (freshness / state map / blink encoding) — plus the Pi supervisor shell (`run_panel.py`, raw
-`lgpio`) and `apogee-panel.service`. Host suite green. **Remaining before merge:** deploy to
-`apogee-gs` from git, run the lamp sweep, pin per-position GPIOs in `LED_GPIO`, correct the
-wiring doc's L→R order.
+`lgpio`) and `apogee-panel.service`. Deployed to `apogee-gs` through the sanctioned git path,
+lamp sweep run, **per-position GPIOs resolved by single-LED probing** and the wiring doc's
+fully-reversed L→R order corrected. `apogee-panel` enabled for boot. **221 tests green.**
+**Ready for review + `--no-ff` merge** (Frank's gate).
 
 **Heartbeat verification — what was actually proven** (corrected 2026-07-31): the 1 Hz
 loop-driven heartbeat was confirmed live on `apogee-gs`, and the running `service.py`,
@@ -332,14 +333,24 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   `_oled_update` bug), with `last_rx_ts` a **separate** field; **stale threshold 3 s** (tolerate
   2 missed ticks, avoid flap); **atomic temp+rename**; parse-fail = retain last-good ts (age out,
   don't flip). **Assignment:** RED (supervisor) = NOT RECORDING (ingest down / gate refused /
-  **write-failing — NOT YET WIRED**, see below), slow-pulse=shutdown, fast=low-batt; GREEN×3 = alive-heartbeat / RX-blink /
-  flight-open (solid, adjacent to RED as the recording-status pair); BLUE#1 = clock provenance
-  (solid=RTC, blink=attested, off=unknown); BLUE#2 = RF trouble (foreign OR CRC-climbing=fast).
+  **write-failing — NOT YET WIRED**, see below), slow-pulse=shutdown, fast=low-batt.
+  **Logical names bind to a physical POSITION** (left→right, 1–6) — never to a GPIO number and
+  never to an ordinal like "the first blue", which is unresolvable standing at a real panel and
+  is exactly what turned this into a bench question. Confirmed layout 🔵🔵🔴🟢🟢🟢:
+  **pos 1** `B_RF` RF trouble (foreign=slow, CRC-climbing=fast) · **pos 2** `B_CLOCK` clock
+  provenance (solid=RTC, blink=attested, off=unknown) · **pos 3** `RED` NOT RECORDING ·
+  **pos 4** `G_FLIGHT` flight open (solid) · **pos 5** `G_RX` RX activity · **pos 6** `G_ALIVE`
+  alive-heartbeat. RED and `B_CLOCK` are adjacent on purpose — both answer "is my data good?",
+  so trust reads in one glance; `G_FLIGHT` sits on RED's other side as the recording-status
+  pair. **Canonical map:** `LED_GPIO`/`COLOR`/`lamp_test_order()` in `ground/panel/leds.py`,
+  host-tested for mutual agreement.
   **Blink vocab** off/slow/fast/solid + heartbeat; **power-on lamp test** sweeps all six (dead-LED
   detection + resolves the physical L→R order). **Pure `led_states(state)->{led:BlinkState}` core,
-  host-tested** like the clock work; thin Pi-only GPIO shell. **Doc bug to fix in this branch:**
-  the wiring doc's LED physical order is reversed — real panel is 🔵🔵🔴🟢🟢🟢 (confirmed 2026-07-30),
-  doc says 🟢🟢🟢🔴🔵🔵; the lamp test pins exact per-position GPIOs, then correct the doc.
+  host-tested** like the clock work; thin Pi-only GPIO shell. **Doc bug — FIXED 2026-07-31:** the
+  wiring doc's LED order was reversed in *every row*; each line was lit individually on the
+  bench and its position counted. Lesson recorded there: single-LED probing is the only reliable
+  method — a running sweep is too fast to call, and a whole-panel glance invites the left/right
+  slip that produced the original wrong map.
 
 ### Panel signals designed but INERT
 
@@ -380,7 +391,7 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   The supervisor can only tell clock-trusted (marker present) from unknown (absent); it can't
   distinguish RTC-restore from a manual attest, so B_CLOCK shows solid=RTC even when attested.
   Fix: have `restore_clock`/
-  `attest_clock` write the reason INTO the marker (they touch it empty today) so BLUE#1 can blink
+  `attest_clock` write the reason INTO the marker (they touch it empty today) so `B_CLOCK` (pos 2) can blink
   on attest. Small follow-up to the clock module.
 - **`feat/drift-guards` — NOT NOW, deliberately deferred (2026-07-31).** Would pair a
   non-duplication test with the unit-install guard below. **Deferred because the sanctioned

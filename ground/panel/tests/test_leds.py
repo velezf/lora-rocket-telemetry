@@ -7,7 +7,9 @@ co-assertion so an all-OFF stub cannot satisfy them by accident.
 """
 import itertools
 
-from ground.panel.leds import Blink, LEDS, led_states, lamp_test_order, lamp_sweep_plan
+from ground.panel.leds import (
+    Blink, LEDS, LED_GPIO, COLOR, led_states, lamp_test_order, lamp_sweep_plan,
+)
 
 
 def base_state():
@@ -168,6 +170,36 @@ def test_lamp_test_covers_all_six_once():
     order = lamp_test_order()
     assert sorted(order) == sorted(LEDS)
     assert len(order) == len(set(order)) == 6
+
+
+# --- the panel map: physical order, GPIO assignment and colors must agree ---
+#
+# These three facts used to live in two files that could disagree (lamp_test_order here,
+# LED_GPIO/COLOR in the Pi shell). They did disagree — in 4 of 6 slots — and it cost a
+# full bench session of single-LED probes to find out. Now they sit together and this
+# test enforces agreement in milliseconds on the Mac. Do not re-split them.
+
+PANEL_COLORS = ["blue", "blue", "red", "green", "green", "green"]   # 🔵🔵🔴🟢🟢🟢, probed 2026-07-31
+
+
+def test_every_led_has_a_gpio_and_a_color():
+    assert sorted(LED_GPIO) == sorted(LEDS)
+    assert sorted(COLOR) == sorted(LED_GPIO.values())
+    assert len(set(LED_GPIO.values())) == 6         # no two LEDs share a line
+
+
+def test_physical_order_maps_through_gpio_to_the_confirmed_color_sequence():
+    # THE pin. lamp_test_order() is physical left->right; mapping it through LED_GPIO and
+    # COLOR must reproduce the sequence read off the real panel. A wrong LED map means
+    # misreading the panel at the pad, so it is worth a test rather than a probe.
+    assert [COLOR[LED_GPIO[name]] for name in lamp_test_order()] == PANEL_COLORS
+
+
+def test_flight_led_is_adjacent_to_red():
+    # Design intent: flight-open sits beside RED as the recording-status pair, so the
+    # "am I capturing?" signals read as one group.
+    order = lamp_test_order()
+    assert abs(order.index("G_FLIGHT") - order.index("RED")) == 1
 
 
 # --- lamp-sweep PLAN: the pacing the Pi shell executes verbatim ---

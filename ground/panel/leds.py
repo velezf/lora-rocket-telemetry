@@ -38,6 +38,17 @@ class Blink(Enum):
 
 LEDS = ("RED", "G_ALIVE", "G_RX", "G_FLIGHT", "B_CLOCK", "B_RF")
 
+# THE PANEL MAP. Logical names bind to a PHYSICAL POSITION — never to a GPIO number and
+# never to an ordinal like "the first blue". Positions are counted left->right from the
+# operator's view, 1..6, and are the only stable way to talk about a panel you can point at.
+#
+# Pure data, so it lives here with lamp_test_order() and not in the Pi shell: these three
+# facts must agree, and when they lived in two files they disagreed in 4 of 6 slots — found
+# only by lighting LEDs one at a time at the bench. A host test now enforces agreement.
+# Colors are FIXED by the harness; the wiring is what it is.
+LED_GPIO = {"RED": 26, "G_ALIVE": 5, "G_RX": 6, "G_FLIGHT": 13, "B_CLOCK": 12, "B_RF": 16}
+COLOR = {5: "green", 6: "green", 13: "green", 26: "red", 12: "blue", 16: "blue"}
+
 
 def led_states(state: dict) -> dict:
     """Pure: system-state snapshot -> {led_name: Blink}."""
@@ -76,9 +87,18 @@ def led_states(state: dict) -> dict:
 
 
 def lamp_test_order() -> list:
-    """Power-on sweep order, physical left->right (blue blue red green green green,
-    confirmed 2026-07-30). Every LED exactly once so a dead one shows up at boot."""
-    return ["B_CLOCK", "B_RF", "RED", "G_ALIVE", "G_RX", "G_FLIGHT"]
+    """The six LEDs in PHYSICAL LEFT->RIGHT order — 🔵🔵🔴🟢🟢🟢, resolved per-position by
+    single-LED probing on the bench 2026-07-31 (pos1 GPIO16, pos2 GPIO12, pos3 GPIO26,
+    pos4 GPIO13, pos5 GPIO6, pos6 GPIO5). Doubles as the power-on sweep order; every LED
+    appears exactly once so a dead one shows up at boot.
+
+    Reading the panel left->right: RF trouble, clock provenance, NOT-RECORDING, flight
+    open, RX activity, alive-heartbeat. The two "is my data good?" signals — RED
+    (not recording) and B_CLOCK (timestamps trustworthy) — are ADJACENT on purpose, so
+    trust reads in one glance; G_FLIGHT sits on RED's other side as the recording-status
+    pair (pinned by test).
+    """
+    return ["B_RF", "B_CLOCK", "RED", "G_FLIGHT", "G_RX", "G_ALIVE"]
 
 
 def lamp_sweep_plan(on_s=1.2, gap_s=0.4, all_on_s=1.5, pass_gap_s=2.0, passes=2) -> list:

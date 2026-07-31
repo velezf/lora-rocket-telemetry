@@ -4,9 +4,9 @@ Owns ALL SIX front-panel LEDs and drives them from the pure policy in ground/pan
 supervisor}.py — ingest is only a state source (the /run heartbeat file). Fail-closed: a
 missing/stale heartbeat -> RED (not recording), so the invisible fail-closed gate is visible
 without a screen. Runs at 8 Hz so FAST/SLOW blinks stay distinct. A power-on lamp sweep (pure
-plan in leds.py) lights all six at once for dead-LED detection, then marches them in the
-believed physical L->R order — so a correct LED_GPIO map reads as a clean march and a wrong one
-shows a visible out-of-order jump, which is what pins the per-position GPIOs.
+plan in leds.py) lights all six at once for dead-LED detection, then marches them in physical
+L->R order, so a healthy panel reads as a clean uninterrupted march and any wiring change shows
+up as an out-of-order jump.
 
 Raw lgpio (active-high) — the SAME single GPIO story as the RX transport (ADR 0002); no second
 GPIO abstraction on the box, which the Epic 8 handheld inherits. Hardware glue, NOT host-tested
@@ -23,19 +23,17 @@ from datetime import datetime, timezone
 
 import lgpio   # pyright: ignore[reportMissingImports]  # Pi-only dep
 
-from ground.panel.leds import led_states, lamp_sweep_plan, lamp_test_order
+from ground.panel.leds import (
+    led_states, lamp_sweep_plan, lamp_test_order, LED_GPIO, COLOR,
+)
 from ground.panel.supervisor import supervisor_state, is_lit, TICKS_PER_SEC
 from ground.panel.heartbeat import STATE_PATH
 
 MARKER = "/run/apogee-rtc-restored"
 GPIOCHIP = 0   # matches ground/rx/transport.py (RESET GPIO25); Pi 5 header GPIOs
 
-# Colors are FIXED by the harness (GPIO 5/6/13 green, 26 red, 12/16 blue). The per-position
-# function assignment (which green is flight-open, which blue is clock, ...) is PROVISIONAL
-# until the power-on lamp sweep resolves physical L->R; then this map + the wiring doc's
-# reversed order get corrected together.
-LED_GPIO = {"RED": 26, "G_ALIVE": 5, "G_RX": 6, "G_FLIGHT": 13, "B_CLOCK": 12, "B_RF": 16}
-COLOR = {5: "green", 6: "green", 13: "green", 26: "red", 12: "blue", 16: "blue"}
+# LED_GPIO / COLOR / lamp_test_order live TOGETHER in leds.py — pure data, host-tested for
+# mutual agreement. Do not restate any of them here.
 
 
 def _log(msg):
@@ -84,10 +82,10 @@ def lamp_sweep(chip):
     """Execute the pure lamp_sweep_plan() verbatim — the order and pacing are decided and
     tested in ground/panel/leds.py, not here. This function is only GPIO writes and sleeps.
 
-    The march runs in the order we BELIEVE is physical left->right, so a correct LED_GPIO
-    map looks like a clean L->R march and a wrong one shows a visible out-of-order jump.
-    Each step is logged with its GPIO + color so the journal can be read back against what
-    the operator saw."""
+    The march runs in physical left->right order (resolved by bench probing 2026-07-31, now
+    pinned by a host test), so a healthy panel reads as a clean L->R march and any rewiring
+    shows up as an out-of-order jump. Each step logs its position/GPIO/color so the journal
+    can be read back against what the operator saw."""
     _log("lamp test — all six together first (dead-LED check), then a L->R march, twice.")
     for lit, secs in lamp_sweep_plan():
         if len(lit) == 1:

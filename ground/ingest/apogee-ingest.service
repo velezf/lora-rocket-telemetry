@@ -13,6 +13,9 @@ StartLimitIntervalSec=0
 Type=simple
 User=rocketman
 WorkingDirectory=/home/rocketman/lora-rocket-telemetry
+# /run/apogee (rocketman-owned, tmpfs) for the LED-supervisor heartbeat state file. Removed
+# on stop, so a stopped ingest -> file gone -> supervisor sees "down" -> RED.
+RuntimeDirectory=apogee
 # Never open a session under a stale clock. FAIL-CLOSED gate: proceed only if the clock
 # is NTP-synced OR set from the PiSugar RTC (the /run marker) — a plausible-year
 # systemd-timesyncd floor alone no longer passes. Field escape hatch when the RTC is

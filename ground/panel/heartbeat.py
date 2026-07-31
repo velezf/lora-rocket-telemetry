@@ -16,6 +16,12 @@ Host-tested; no hardware.
 import json
 import os
 
+# Shared path for publisher (ingest) and reader (supervisor). /run is tmpfs (no SD wear on a
+# 1 Hz rewrite, ephemeral per boot); /run/apogee is created rocketman-owned via
+# RuntimeDirectory=apogee on apogee-ingest.service (and removed on stop -> file vanishes ->
+# supervisor sees "down" -> RED, the correct degradation).
+STATE_PATH = "/run/apogee/ingest-state.json"
+
 
 def state_snapshot(ts, last_rx_ts=None, flight_open=False, write_ok=True, **extra) -> dict:
     """Build the published snapshot. `ts` (liveness) and `last_rx_ts` (traffic) stay

@@ -80,7 +80,7 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 - **2.2** — WiFi-on-boot: NetworkManager autoconnect → phone hotspot (fixed SSID/password, infinite retry); verify cold-boot rejoin
 - **2.3** — Claude Code on the Pi: native installer; 8 GB is comfortable. Runs but isn't Mac-snappy — good for on-box tinkering, heavy lifting stays on the Mac
 - **2.4** — GitHub pull path: SSH deploy key, clone, `git pull` update routine for ground-side code
-- **2.5** — **Native LoRa RX:** wire the antenna-equipped RFM96W breakout to the Pi's SPI (~7 lines: SPI ×3, CS, RESET, 3V3, GND; DIO0 unconnected). `adafruit_rfm9x` at 434 MHz, mirroring the sled's RadioHead modem config; lower SPI baudrate (~1 MHz) for breakout reliability; accept broadcast (`0xFF`). The library strips its 4-byte RadioHead header and hands the payload to the decoder
+- **2.5** — **Native LoRa RX:** wire the antenna-equipped RFM96W breakout to the Pi's SPI (~7 lines: SPI ×3, CS, RESET, 3V3, GND; DIO0 unconnected). **AS BUILT (deviates from this text — see [ADR 0002](adr/0002-ground-rx-driver-spidev.md)): raw `spidev` + `lgpio`, not Blinka/`adafruit_rfm9x`.** RPi.GPIO won't run on BCM2712 and Blinka was rejected; the repo's own SX127x driver (`ground/rx/`) drives the modem at 434 MHz mirroring the sled's RadioHead config, enforces CRC, strips the 4-byte RadioHead header, and accepts broadcast (`0xFF`). Host-tested against a fake SPI. The whole ground stack is Blinka-free
 - **2.6** — UPS / power: PiSugar 3 Plus back-mounts on pogo pins (header stays free), powering the Pi 5 from underneath; feed the 12 V → buck → micro-USB chain into its micro-USB charge port; battery % over I²C; graceful low-battery shutdown. Mind the 3A cap (see build notes). Cooling is passive — heatsinks on the SoC + RP1, run lid-off
 
 ## Epic 3 — Firmware (sled TX) + shared contract + addressing
@@ -104,7 +104,7 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 - **4.3** — Flight logging: per-flight CSV/JSON to disk, with `SRC` + `SEQ` packet-loss / link-quality stats
 - **4.4** — Live local dashboard: gauges + altitude trace served on the Pi, viewable from your phone over the hotspot
 - **4.5** — Web publish: push flight logs to the repo → render on velezf.github.io (Quarto/JS), one permalink per flight
-- **4.6** — Status OLED (Adafruit 938, I²C): shares the I²C bus with the PiSugar at a different address; radio is on SPI. Driven straight off each decoded packet — altitude, peak, RSSI/link quality, `SEQ` loss, flight state, and both `SRC:1` + `SRC:2`. Reuses the handheld's OLED rendering; cut a window in the front panel
+- **4.6** — Status OLED (Adafruit 938, I²C): shares the I²C bus with the PiSugar at a different address; radio is on SPI. Driven **from a view-model snapshot on its own thread** (amended 2026-07-31 — the original "straight off each decoded packet" is the specification of a defect: it puts rendering on the RX thread, where a display fault can stall capture, and yields no idle page on a quiet pad) — altitude, peak, RSSI/link quality, `SEQ` loss, flight state, and both `SRC:1` + `SRC:2`. Reuses the handheld's OLED rendering; cut a window in the front panel
 - **4.7** *(optional)* — Live-to-web during flight via MQTT-over-cell — gated on launch-site coverage
 
 ## Epic 5 — 9-DoF integration (LSM6DSOX + LIS3MDL)

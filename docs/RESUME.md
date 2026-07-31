@@ -3,7 +3,12 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: 2026-07-30 (Claude, on Mac + Pi 5 over Ethernet). Since 2026-07-27: RTC-boot-restore
+_Last updated: **2026-07-31** (Claude, on Mac + Pi 5). **This session: `feat/panel-leds` MERGED and
+pushed** — the six-LED supervisor is live and enabled for boot on `apogee-gs`. Also landed three
+pieces of process that outlive the branch: the **sanctioned deploy path**, the canonical
+**"designed but INERT"** register, and **"cite, don't restate"**. Repo-wide **branch cleanup**
+done (34 stale branches removed; Mac/GitHub/Pi all on `main` only). **4.5 is UNGATED** — F1 bench
+data is sufficient to publish; see Immediate next steps. Earlier: RTC-boot-restore
 merged + pushed (ADR 0003); **wake-on-charge** (`auto_power_on`) enabled; **graceful button
 off-switch** validated (USB-C double-tap → clean `service_stop`; both PiSugar buttons close the log
 cleanly); **OLED rewire verified** (the "dark" was a no-idle-page firmware gap, not hardware).
@@ -28,12 +33,16 @@ events). Plus an offline **flights CLI** (`rebuild`/`list`/`annotate`/`close`/`o
 over a three-files/one-writer model (session ← service, ops journal ← CLI, index ← derivation).
 **Field-time hardening** landed too: PiSugar RTC initialized + `auto_rtc_sync`, systemd clock
 gate, and monotonic silence/duration deltas (immune to wall-clock steps); session filenames
-are collision-proof. **4.4 dashboard + 4.6 status OLED are now done, merged, and deployed**
+are collision-proof. **4.4 dashboard + 4.6 status OLED are merged and deployed** (4.6 for `SRC:1` on the bench —
+three plan clauses deferred, see Epic status)
 — live Flask/Chart.js dashboard (density pass: header callsign, per-SRC flight badge + live
 age, T+, RSSI sparkline, events feed, health line) + SSD1306 status OLED on `0x3d`, both on a
 per-SRC **AGL pad baseline** (ALT−baseline while `St:0`; raw ALT untouched in records; resets
 on `flight_close`). Bench-verified on `apogee-gs` against live sled telemetry. **Epic 4
-remaining: 4.5 web publish only, gated on the first real flight.** Epic 8 groundwork merged.
+remaining: 4.5 web publish only — NO LONGER GATED on a real flight** (2026-07-31: the Stage-1
+pipeline was run against F1 and emits a complete, honest payload; see Immediate next steps).
+Epic 8 groundwork merged. **`feat/panel-leds` merged 2026-07-31** — six-LED supervisor live and
+enabled for boot.
 
 ## Ground station (`apogee-gs`) — access
 
@@ -140,9 +149,9 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | Epic | Status |
 |------|--------|
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
-| 2 — Pi 5 ground-station bring-up | ✅ **CLOSED.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
+| 2 — Pi 5 ground-station bring-up | ✅ **CLOSED except 2.2 field verification.** (2.2's own acceptance clause is "verify cold-boot rejoin" and the hotspot field test is still open — calling the epic closed while its acceptance clause is unverified is the same claiming-coverage-we-lack pattern removed from the panel docs 2026-07-31.) **2.5 deviates from the plan BY DESIGN** — raw `spidev`+`lgpio`, not Blinka/`adafruit_rfm9x` (ADR 0002); plan text reconciled 2026-07-31. OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **Remaining: 4.5 web publish only.** |
+| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 done & merged; 4.6 functionally done for `SRC:1` on the bench.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **4.6 is NOT done as specified** (re-marked 2026-07-31): three plan clauses are deferred — **multi-node `SRC:2` display → Epic 7** (no lander exists), **"reuses the handheld's OLED rendering" → Epic 8** (no shared module exists), **"cut a window in the front panel" → enclosure** (still benchtop, not boxed). The clause that IS implemented — "driven straight off each decoded packet" — specifies the defect (render on the RX thread, no idle page) and was amended in the plan. **Remaining: 4.5 web publish (UNGATED — publishes on F1 alone).** |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -150,14 +159,10 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 
 ## Open branches (pending review/merge)
 
-**`feat/panel-leds` — open, unmerged, unpushed.** Six commits: pure `led_states()` policy +
-lamp-sweep order/plan, the G_ALIVE-never-solid invariant, the fail-safe ingest heartbeat
-publisher, its wiring into the RX loop, severity captures, and the pure supervisor logic
-(freshness / state map / blink encoding) — plus the Pi supervisor shell (`run_panel.py`, raw
-`lgpio`) and `apogee-panel.service`. Deployed to `apogee-gs` through the sanctioned git path,
-lamp sweep run, **per-position GPIOs resolved by single-LED probing** and the wiring doc's
-fully-reversed L→R order corrected. `apogee-panel` enabled for boot. **221 tests green.**
-**Ready for review + `--no-ff` merge** (Frank's gate).
+**NONE OPEN.** `feat/panel-leds` **merged** (`--no-ff`, `6338aa9`) and pushed 2026-07-31 —
+12 commits. **Branch cleanup done the same day: 34 stale branches deleted**, each verified an
+ancestor of `origin/main` first; Mac, GitHub and Pi now carry **`main` only**. (Deleted tips
+remain in the Mac reflog ~90 days, and every commit is in `main`'s history regardless.)
 
 **Heartbeat verification — what was actually proven** (corrected 2026-07-31): the 1 Hz
 loop-driven heartbeat was confirmed live on `apogee-gs`, and the running `service.py`,
@@ -165,7 +170,10 @@ loop-driven heartbeat was confirmed live on `apogee-gs`, and the running `servic
 (sha256) to the committed versions** — so the result is sound and attributable. What was NOT
 sound was reproducibility: the Pi's checkout was on `main`, 19 commits behind, with hand-copied
 files and two superseded `ground/clock/` modules. Provenance verified after the fact by hashing,
-not by the deploy path. See the unit-install drift guard — this is that failure class, again.
+not by the deploy path — which is why the **sanctioned deploy path** now exists. Re-verified
+after the fact from a clean checkout: heartbeat ticking 1 Hz from committed code, all four units
+hash-matching the repo, `apogee-panel` `active`/`enabled`, steady state confirmed on the physical
+panel (`B_CLOCK` solid pos 2, `G_ALIVE` pulsing pos 6).
 
 `feat/rtc-boot-restore` merged into `main` via `--no-ff` (RTC-boot-restore +
 fail-closed clock gate + apogee-attest escape hatch; ADR 0003; verified on a Wi-Fi-OFF cold
@@ -274,9 +282,63 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
    with F1's real data on pages-repo branch `feat/flights-section` (committed, **not merged** —
    Frank reviews + merges + pushes; then **Stage-3 tag** `v1.0-portfolio-genesis`). Local preview:
    `QUARTO_PYTHON=$(pwd)/.venv/bin/python3 quarto preview projects/lora-flights.qmd`.
-2. **Panel LEDs — DONE** (`feat/panel-leds`, awaiting merge): all six functions assigned by
-   physical position, supervisor deployed and enabled for boot. *(Physical field/boot tests are
-   under "Physical tasks" above.)*
+   **4.5 IS UNGATED (2026-07-31).** The old "gated on the first real flight" was never tested —
+   the Stage-1 pipeline was run against F1 and emits a **complete, well-formed payload**:
+   `peak_agl_ft 10`, `baseline_ft −84`/`baseline_n 15`, `duration_s 87.556`, `packets_rx 75`,
+   `packets_lost 1`, `loss_pct 1.32`, `rssi −38…−14`, plus a 75-row CSV and a resolving
+   `?flight=2026-07-08-F1` permalink. **Nothing breaks at n=1.** Two things are *thin* (the
+   selector has one option; the AGL profile is a 10 ft blip then ~80 s flat at 1 ft) and one is
+   **unverified** — the Stage-2 page lives in the *site* repo, so any cross-flight element
+   (peak-over-time, flight count, personal best) needs an n=1 fallback or hiding until n≥2.
+   Check that at review time; it is the only thing that could look *broken* rather than thin.
+   **Two conditions:** (a) `flights annotate 2026-07-08-F1` first — `motor`/`field` are empty
+   strings and would render blank; set them (`motor: none`, `field: bench`) so the honest
+   labelling rides in the data, not in prose; (b) **do not dress up the 10 ft** — it is hand-swing
+   sensor noise, not a climb. Presenting it as an achievement would be the
+   claiming-coverage-we-lack pattern, in public.
+
+   **Execution order:** annotate F1 → Stage-1 `flights publish` → Frank reviews/merges/pushes
+   pages-repo `feat/flights-section` → add the one authorized kernel line to the site Action →
+   verify CI re-executes (`freeze:false`) and the permalink resolves → local preview gate →
+   tag `v1.0-portfolio-genesis`. **This closes Epic 4.**
+2. **OLED branch — ONE branch, not three** (`feat/oled-heartbeat`): idle page + **render off the
+   RX thread** + reinit recovery. Frank's stated next start after 4.5. See Backlog for detail.
+3. **Panel LEDs — DONE and merged** 2026-07-31.
+
+## Working rules (adopted 2026-07-31)
+
+**Admission rule.** Admit work into the current scope only if it **(a)** prevents a failure that
+loses flight data, corrupts the record, or misleads the operator at the pad, **AND (b)** has
+concrete evidence the failure is real — an incident, a probe, or a signal that actively lies.
+Clause (b) is what makes it a rule and not a mood: `feat/drift-guards` failed on (b) (three
+historical incidents, two of which its mechanism could not catch) and was deferred; the LED map
+passed on both and was built.
+
+**Currently ADMITTED** (all small; the three OLED items collapse into one branch):
+`write_ok` wiring (RED's disk-full leg is on the INERT register — it claims coverage it lacks) ·
+OLED render off the RX thread (a display fault can stall capture) · OLED idle page (observed
+2026-07-30) · battery-discharge logging (15% is unmeasured; if the pack is the non-Plus it is
+~5 min of warning, not ~20).
+
+**Budget rule.** **Two slots, evidence-gated** — at most one *correctness* branch and one
+*hardening* branch open at a time. Anything admitted must name the failure it prevents and the
+evidence for it. The backlog never enters the critical path on its own momentum; it waits for a
+flight to produce evidence.
+
+**Epic order: 6 before 7.** Epic 7's closure bar requires separation *at main*, which requires
+deployment to work — building the lander first yields a payload with nothing to eject it. Epic 6
+is also the only safety-critical epic and deserves the slot while attention is fresh; its 6.2
+arm-pin state machine is pure host-tested logic, which this project does well.
+
+**Epic 7 closure bar.** Done when, **in one real flight**: a `SRC:2` node transmits valid v1
+packets that the ground service logs as a **separate flight record**; its transmissions **do not
+collide** with `SRC:1` (measured, not assumed); it **survives boost-g** and impact; it
+**separates at main and is recovered**; and its atmosphere fields appear on dashboard + OLED.
+*Sequencing:* 7.3 forces the two deferred **Epic 6 firmware riders** (per-unit `-DSRC_ID`, ±10%
+TX jitter) — they stop being optional the moment a second transmitter exists, so **admit them
+into Epic 7, not Epic 6**. 7.6 also unblocks 4.6's deferred `SRC:2` clause. Cheapest first slice:
+**7.1 + 7.2 + 7.3**, pure bench work on hardware already in hand, retiring multi-node risk before
+any mechanical commitment.
 
 ## Backlog (not now)
 
@@ -430,10 +492,12 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   `apogee-*.service` against the repo copies; run at deploy/boot or as a test) **or** a single
   sanctioned `install-units.sh` (copy + `daemon-reload`). Not implemented — pick one when Epic 8
   needs it.
-- **Stale-branch cleanup pass** — the repo carries ~24 merged/dead local branches (`feat/*`
-  from Epics 1–4 already in `main`, plus `worktree-agent-*` merge-artifact branches). Prune the
-  ones fully contained in `main` so `git branch` reflects only live work. Not urgent; do a sweep
-  when convenient. (Don't delete anything not merged — verify `git branch --merged main` first.)
+- ~~**Stale-branch cleanup pass**~~ — **DONE 2026-07-31.** 34 branches deleted (26 `feat/*`+`docs/*`,
+  7 `worktree-agent-*`, plus `origin/feat/gs-bringup` and the Pi's local `feat/panel-leds`). Each
+  was verified an ancestor of `origin/main` *before* deletion, then deleted with `git branch -d`
+  (the safe form) — two independent checks; 0 skipped, 0 refused. Worktree registry pruned first,
+  since a branch checked out in a stale worktree cannot be deleted. Mac, GitHub and Pi now carry
+  **`main` only**.
 - **Pi 5 RTC coin cell (Option A)** — connect a battery to the Pi 5 RTC header (J5) so `rtc0`
   keeps time and the kernel sets a correct clock at boot with no PiSugar/NTP. Cleanest, most
   robust fallback; complements (doesn't replace) the `feat/rtc-boot-restore` software path. Frank

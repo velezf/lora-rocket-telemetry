@@ -7,8 +7,9 @@ _Last updated: 2026-07-30 (Claude, on Mac + Pi 5 over Ethernet). Since 2026-07-2
 merged + pushed (ADR 0003); **wake-on-charge** (`auto_power_on`) enabled; **graceful button
 off-switch** validated (USB-C double-tap → clean `service_stop`; both PiSugar buttons close the log
 cleanly); **OLED rewire verified** (the "dark" was a no-idle-page firmware gap, not hardware).
-Designed (not built): `feat/oled-heartbeat` layout redesign + `feat/panel-leds` (architecture
-locked) — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
+**`feat/panel-leds` is now BUILT, not merely designed** (2026-07-31): pure LED policy + supervisor
+logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor shell/unit — see
+"Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
 ## Where we are
@@ -48,10 +49,61 @@ remaining: 4.5 web publish only, gated on the first real flight.** Epic 8 ground
   **System `python3` is no longer sufficient** — an SD-card rebuild must recreate `~/gs-venv`
   (`--system-site-packages`) with `luma.oled`. **`uv` not yet installed**.
 - **Repo:** cloned at `~/lora-rocket-telemetry` via a **read-only deploy key** (`apogee-gs`);
-  `git pull` works (Pi pulled to current `main`).
+  `git pull` works. **The deploy key is read-only and the Pi tracks `origin`, so an unpushed
+  branch cannot reach the box by `git pull`** — that is exactly how the 2026-07-31 hand-copy
+  drift happened. Deploy unpushed work over SSH from the Mac, never by copying files.
 - **Wi-Fi:** home **WideRoad** (priority 0) first, **iPhone 17 hotspot** fallback
   (priority −10, infinite retry, persistent NM keyfile). Networking is netplan-rendered
   → NetworkManager. _(Hotspot secret lives only on the Pi, never in this repo.)_
+
+## Deploying to `apogee-gs` — the sanctioned path
+
+**Code reaches the Pi through git, never by copying files.** The absence of a written path is
+what produced the 2026-07-31 hand-copy drift (a stale checkout running hand-placed files, whose
+provenance had to be reconstructed afterwards by hashing). **Epic 8's handheld inherits this
+procedure** — keep it in one place.
+
+1. **Commit** on the feature branch (Mac). Frank's gate.
+2. **Push the branch** to `origin` (Frank's gate — a *branch* push is separate from a `main`
+   push). A WIP branch on the public repo is normal, disappears at merge, and gives durable
+   off-laptop backup — the other lesson that keeps recurring.
+3. **Pi pulls** with its existing read-only deploy key:
+   `git fetch origin && git checkout <branch> && git pull --ff-only`.
+   **`git status --porcelain` must be empty first** — a dirty tree means undeployed state that
+   nobody can reproduce; inspect and discard it before checking out (`git diff` it first: on
+   2026-07-31 the local edits turned out to be strictly *older* than the committed versions).
+4. **Install units** from the repo — they execute from `/etc/systemd/system/`, not the checkout:
+   `sudo install -m 644 ground/<area>/<unit>.service /etc/systemd/system/ && sudo systemctl daemon-reload`
+5. **Restart** the affected services (`sudo systemctl restart apogee-ingest`;
+   `sudo systemctl enable --now apogee-panel`).
+6. **Verify — against the committed artifact, not by eye.** Confirm the installed unit matches
+   the repo (`sha256sum` both), the service is `active`, and the *observable output* is correct
+   (e.g. the heartbeat file's `ts` advancing ~1 Hz). Only then is a result attributable.
+
+**Rejected alternative — the Pi as a git remote** (`git push apogee-gs <branch>` with
+`receive.denyCurrentBranch=updateInstead` on the Pi). Rejected because it needs new machinery,
+mutates the Pi's git config, and duplicates a read-only deploy key that already works — while
+push-to-origin also buys off-laptop backup. **What we gave up is genuinely attractive, though:
+`updateInstead` refuses to update a repo whose working tree is dirty**, which would have
+*mechanically blocked* the exact drift we hit rather than merely documenting against it.
+Revisit if pushing WIP branches to a public origin ever becomes undesirable.
+
+## Host tests (the Mac) — `.venv-test`
+
+Host tests run under **`.venv-test`** (gitignored): `.venv-test/bin/python -m pytest ground/ -q`.
+
+**One venv, one purpose** — `.venv` is the Quarto/Stage-1 *render* env (its `pyproject.toml`
+says so) and deliberately does **not** carry `pytest`; mixing them would repeat the
+one-writer-per-file mistake in another form. Recreate with:
+
+```
+python3 -m venv .venv-test && .venv-test/bin/python -m pip install pytest
+```
+
+**Rebuild implication:** a fresh Mac (or a wiped repo) has **no** pytest anywhere until this is
+recreated — on 2026-07-31 pytest was absent from `.venv`, system `python3`, Homebrew, pyenv,
+*and* the Pi's `~/gs-venv`, which blocked TDD outright until it was rebuilt. The ground suite is
+pure/host-only, so it does **not** need the Pi. Current: **221 tests green**.
 
 ## Wired peripherals (bench-verified 2026-07-07)
 
@@ -60,13 +112,15 @@ remaining: 4.5 web publish only, gated on the first real flight.** Epic 8 ground
 | RFM96 LoRa radio | SPI0 | **CE1** (`/dev/spidev0.1`, pin 26); RESET GPIO25 (pin 22) | `RegVersion 0x12`. **Not CE0.** |
 | OLED (Adafruit 938, SSD1306 128×64) | I²C-1 | `0x3d` | driven via `~/gs-venv` + **`luma.oled`** |
 | PiSugar 3 Plus UPS | I²C-1 | `0x57` batt, `0x68` RTC | `pisugar-server`; auto-shutdown at 5% / 30 s |
-| Front-panel LEDs ×6 | GPIO | `5,6,13,26,12,16` (L→R: grn×3, red, blu×2) | active-high; bring-up via `ground/tools/led_check.py` |
+| Front-panel LEDs ×6 | GPIO | physical **L→R: `16,12,26,13,6,5`** = 🔵🔵🔴🟢🟢🟢 (per-position, single-LED probed 2026-07-31) | active-high; bring-up via `ground/tools/led_check.py`. Canonical map: `ground/panel/leds.py` (host-tested) |
 | Sled 9-DoF (bench, Epic 5.1) | I²C | LSM6DSOX `0x6a`, LIS3MDL `0x1c` | on the sled's STEMMA QT bus alongside BMP390 `0x77` / ADXL375 `0x53` |
 
 **Native LoRa RX** = the repo's `ground/rx/` **SX127x driver** (raw `spidev`+`lgpio`,
 host-tested against a fake SPI, CRC-enforcing, RadioHead-header aware). **Blinka rejected —
 [ADR 0002](adr/0002-ground-rx-driver-spidev.md)** (RPi.GPIO won't run on BCM2712). OLED uses
-`luma.oled`; LEDs use `gpiozero`/lgpio — the whole ground stack is Blinka-free. `rocketman`
+`luma.oled`; the panel LEDs use **raw `lgpio`** (same single GPIO story as the RX transport —
+no second GPIO abstraction on the box, which the Epic 8 handheld inherits) — the whole ground
+stack is Blinka-free. `rocketman`
 is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative pin map:**
 [`docs/ground-station-wiring.md`](ground-station-wiring.md).
 
@@ -86,9 +140,9 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | Epic | Status |
 |------|--------|
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
-| 2 — Pi 5 ground-station bring-up | ✅ **CLOSED.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, 6 panel LEDs; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
+| 2 — Pi 5 ground-station bring-up | ✅ **CLOSED.** OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite 159 tests (incl. `feat/rtc-boot-restore`). **Remaining: 4.5 web publish only.** |
+| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 + 4.6 done & merged.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **Remaining: 4.5 web publish only.** |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -96,9 +150,27 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 
 ## Open branches (pending review/merge)
 
-**None open.** `feat/rtc-boot-restore` merged into `main` via `--no-ff` (RTC-boot-restore +
+**`feat/panel-leds` — open, unmerged, unpushed.** Six commits: pure `led_states()` policy +
+lamp-sweep order/plan, the G_ALIVE-never-solid invariant, the fail-safe ingest heartbeat
+publisher, its wiring into the RX loop, severity captures, and the pure supervisor logic
+(freshness / state map / blink encoding) — plus the Pi supervisor shell (`run_panel.py`, raw
+`lgpio`) and `apogee-panel.service`. Deployed to `apogee-gs` through the sanctioned git path,
+lamp sweep run, **per-position GPIOs resolved by single-LED probing** and the wiring doc's
+fully-reversed L→R order corrected. `apogee-panel` enabled for boot. **221 tests green.**
+**Ready for review + `--no-ff` merge** (Frank's gate).
+
+**Heartbeat verification — what was actually proven** (corrected 2026-07-31): the 1 Hz
+loop-driven heartbeat was confirmed live on `apogee-gs`, and the running `service.py`,
+`heartbeat.py` and the *installed* `apogee-ingest.service` were later verified **byte-identical
+(sha256) to the committed versions** — so the result is sound and attributable. What was NOT
+sound was reproducibility: the Pi's checkout was on `main`, 19 commits behind, with hand-copied
+files and two superseded `ground/clock/` modules. Provenance verified after the fact by hashing,
+not by the deploy path. See the unit-install drift guard — this is that failure class, again.
+
+`feat/rtc-boot-restore` merged into `main` via `--no-ff` (RTC-boot-restore +
 fail-closed clock gate + apogee-attest escape hatch; ADR 0003; verified on a Wi-Fi-OFF cold
-boot) — **merged locally, NOT yet pushed to `origin/main`** (awaiting Frank's push gate).
+boot) — **merged AND pushed** (`origin/main` carries it; the earlier "not yet pushed" note was
+stale, corrected 2026-07-31 at the panel-LEDs merge).
 Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + AGL baseline),
 `feat/ground-decoder`, `feat/ingest-{linkstats,records,flights-model,service}`,
 `feat/callsign-id`, `feat/flight-logging` (+ earlier Epic 1–3 branches).
@@ -202,8 +274,9 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
    with F1's real data on pages-repo branch `feat/flights-section` (committed, **not merged** —
    Frank reviews + merges + pushes; then **Stage-3 tag** `v1.0-portfolio-genesis`). Local preview:
    `QUARTO_PYTHON=$(pwd)/.venv/bin/python3 quarto preview projects/lora-flights.qmd`.
-2. **Assign the 6 panel-LED functions** (from decoded packets). *(Physical field/boot
-   tests are under "Physical tasks" above.)*
+2. **Panel LEDs — DONE** (`feat/panel-leds`, awaiting merge): all six functions assigned by
+   physical position, supervisor deployed and enabled for boot. *(Physical field/boot tests are
+   under "Physical tasks" above.)*
 
 ## Backlog (not now)
 
@@ -244,10 +317,17 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   shows the active SRC (or cycles). **If ingest restarts mid-flight:** derive the current page
   from the session/flight state at startup (recoverable), **not** in-memory-only flags — a restart
   must return to LIVE if a flight is still open, not drop the operator back to IDLE.
+  **REQUIREMENT — render OFF the RX thread (severity: HIGH).** Today `_oled_update` renders
+  *synchronously inside the RX loop*, so a wedged I²C bus (luma write hangs) **halts packet
+  handling** — a ~$10 display fault can stop the box's only job, telemetry capture, and stall
+  the heartbeat into RED. `feat/oled-heartbeat` MUST move rendering to its own thread (RX loop
+  publishes a view-model snapshot; the render thread consumes it), so no display fault can ever
+  block capture. This is a correctness requirement of the epic, not a nicety.
 - **`feat/panel-leds`** — six front-panel LEDs (GPIO 5/6/13 green, 26 red, 12/16 blue) as an
   operator-glance surface. **Architecture LOCKED** (2026-07-30): a **supervisor** (`apogee-panel`
   systemd unit, independent of ingest) **owns all six GPIO lines**; ingest is only a *state
-  source* — it publishes `/run/apogee-ingest-state.json` (**one writer**). Fail-closed by default:
+  source* — it publishes the heartbeat state file (**one writer**; the path is `STATE_PATH` in
+  `ground/panel/heartbeat.py` — canonical there, deliberately not restated here). Fail-closed by default:
   no fresh ingest state → supervisor drives the "down" pattern. This is the fix for the
   lying-panel problem — an ingest crash mid-flight must not leave the flight LED lit; the
   supervisor (not ingest) owns it and clears it on stale heartbeat. **State file:** heartbeat
@@ -255,14 +335,93 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   `_oled_update` bug), with `last_rx_ts` a **separate** field; **stale threshold 3 s** (tolerate
   2 missed ticks, avoid flap); **atomic temp+rename**; parse-fail = retain last-good ts (age out,
   don't flip). **Assignment:** RED (supervisor) = NOT RECORDING (ingest down / gate refused /
-  write failing), slow-pulse=shutdown, fast=low-batt; GREEN×3 = alive-heartbeat / RX-blink /
-  flight-open (solid, adjacent to RED as the recording-status pair); BLUE#1 = clock provenance
-  (solid=RTC, blink=attested, off=unknown); BLUE#2 = RF trouble (foreign OR CRC-climbing=fast).
+  **write-failing — NOT YET WIRED**, see below), slow-pulse=shutdown, fast=low-batt.
+  **Logical names bind to a physical POSITION** (left→right, 1–6) — never to a GPIO number and
+  never to an ordinal like "the first blue", which is unresolvable standing at a real panel and
+  is exactly what turned this into a bench question. Confirmed layout 🔵🔵🔴🟢🟢🟢:
+  **pos 1** `B_RF` RF trouble (foreign=slow, CRC-climbing=fast) · **pos 2** `B_CLOCK` clock
+  provenance (solid=RTC, blink=attested, off=unknown) · **pos 3** `RED` NOT RECORDING ·
+  **pos 4** `G_FLIGHT` flight open (solid) · **pos 5** `G_RX` RX activity · **pos 6** `G_ALIVE`
+  alive-heartbeat. RED and `B_CLOCK` are adjacent on purpose — both answer "is my data good?",
+  so trust reads in one glance; `G_FLIGHT` sits on RED's other side as the recording-status
+  pair. **Canonical map:** `LED_GPIO`/`COLOR`/`lamp_test_order()` in `ground/panel/leds.py`,
+  host-tested for mutual agreement.
   **Blink vocab** off/slow/fast/solid + heartbeat; **power-on lamp test** sweeps all six (dead-LED
   detection + resolves the physical L→R order). **Pure `led_states(state)->{led:BlinkState}` core,
-  host-tested** like the clock work; thin Pi-only GPIO shell. **Doc bug to fix in this branch:**
-  the wiring doc's LED physical order is reversed — real panel is 🔵🔵🔴🟢🟢🟢 (confirmed 2026-07-30),
-  doc says 🟢🟢🟢🔴🔵🔵; the lamp test pins exact per-position GPIOs, then correct the doc.
+  host-tested** like the clock work; thin Pi-only GPIO shell. **Doc bug — FIXED 2026-07-31:** the
+  wiring doc's LED order was reversed in *every row*; each line was lit individually on the
+  bench and its position counted. Lesson recorded there: single-LED probing is the only reliable
+  method — a running sweep is too fast to call, and a whole-panel glance invites the left/right
+  slip that produced the original wrong map.
+
+### Panel signals designed but INERT
+
+**Canonical list — the ONE place that says which panel signals are wired end-to-end and which
+are not.** Code cites this heading by name (`ground/panel/{leds,run_panel}.py`); anywhere else
+that describes panel behaviour must link here rather than restate it. The hazard being managed:
+a designed-but-inert safety signal is *worse than an absent one*, because the panel reads
+"fine" while the condition it was meant to catch goes unshown. **Nothing may be described as
+panel-covered until it comes off this list.**
+
+| Signal | Designed behaviour | Why it is INERT today | To activate |
+|---|---|---|---|
+| **RED — write-failing leg** | RED SOLID when the session log stops persisting (disk-full, failed append) | The pure core honours `write_ok=False` (tested), but the ingest publisher **hardcodes `write_ok=True`** — the leg is unreachable end-to-end | Queue-backed writer exposes a health flag → `state_snapshot(write_ok=...)` |
+| **B_CLOCK — attested case** | SLOW blink = operator-attested clock, distinct from SOLID = RTC-restored | The `/run` marker is an **empty touch file**, so the supervisor cannot tell restore from attest; `read_provenance()` can only return `rtc`/`unknown` and attested reads as RTC | `restore_clock`/`attest_clock` write the *reason* into the marker; supervisor reads it |
+
+**Consequences to state plainly:** RED does **not** cover disk-full, and B_CLOCK does **not**
+distinguish an attested clock from an RTC-restored one. Wire both before the panel is trusted
+for go/no-go. Fuller rationale for each in the backlog entries below.
+
+- **Writer health → `write_ok` (RED's write-failing leg is INERT — see the table above).** The pure
+  LED core lights RED SOLID on `write_ok=False` (tested), but the ingest heartbeat publisher
+  **hardcodes `write_ok=True`**. Fix: have the queue-backed writer expose a health flag (last
+  append failed / queue overflowing) and feed it into `state_snapshot(write_ok=...)`. Wire this
+  before relying on the panel for go/no-go.
+- **Battery-low threshold — turn 15% into a MEASURED minutes-of-warning.** `LOW_BATT_PCT=15`
+  is derived from an *assumed* ~5 W draw; the real draw (Pi 5 + radio + OLED + six LEDs) is not
+  that number. The supervisor already polls `battery_pct` at ~1 Hz (once per `TICKS_PER_SEC`
+  ticks, not every tick) — **log it over time to get the actual discharge curve for free**, then
+  reset `LOW_BATT_PCT` from real minutes-to-5%.
+  **Where it belongs:** the supervisor (`apogee-panel`) is its OWN process, so it may write its
+  own output — but **NOT** a second writer to any of the three data files (session JSONL / ops
+  journal / flights index; one-writer-each is locked). Log to **journald** (rate-limited — on a
+  ≥1% change or ~1/min, never 8 Hz), the established audit channel (like the clock events): no new
+  file, rotates, no SD wear, `journalctl -u apogee-panel` gives the curve. Also feeds a future
+  **runway estimate** (“~18 min left”) on the OLED summary page. (Confirm the Plus 5000 mAh pack
+  by eye first — see the `LOW_BATT_PCT` comment; 15% only holds for the Plus.)
+- **Clock-provenance in the /run marker (B_CLOCK attested case — INERT, see the table above).**
+  The supervisor can only tell clock-trusted (marker present) from unknown (absent); it can't
+  distinguish RTC-restore from a manual attest, so B_CLOCK shows solid=RTC even when attested.
+  Fix: have `restore_clock`/
+  `attest_clock` write the reason INTO the marker (they touch it empty today) so `B_CLOCK` (pos 2) can blink
+  on attest. Small follow-up to the clock module.
+- **`feat/drift-guards` — NOT NOW, deliberately deferred (2026-07-31).** Would pair a
+  non-duplication test with the unit-install guard below. **Deferred because the sanctioned
+  deploy path removes most of the mechanism it would detect:** hand-copying happened because
+  there was no sanctioned route to the Pi; once deploys go through `git pull`, the Pi cannot
+  silently diverge. Building a detector for a failure mode we just designed out is backwards.
+  **Re-evaluate after the deploy path has been used a few times** — if drift appears *despite*
+  it, build then, against real evidence rather than three historical incidents.
+
+  **Design, if it is ever built — INVERT the obvious approach.** The instinct is "assert docs
+  agree with the authoritative constant". Better: **assert docs don't restate it at all.** You
+  cannot detect a *wrong* path by searching for the *right* one — you'd have to shape-match
+  (`/run/apogee[-/][\w-]*\.json`) and compare every hit, which brings regex maintenance and
+  false positives on historical notes. Enforcing *non-duplication* needs no registry of expected
+  values, has almost no false-positive surface, and is ~30 lines. Scope to **literal values
+  only**; see the "cite, don't restate" convention in `CLAUDE.md` (adopted 2026-07-31, free).
+
+  **Why the obvious version was worth less than it looked** — of the three incidents that
+  motivated it, a path-drift test would have caught **one**:
+
+  | Incident | Caught by a path-drift test? |
+  |---|---|
+  | Escape hatch restated across four locations | **No** — prose procedure, no literal to compare |
+  | LED L→R order, `RESUME:63` vs `:270` | **No** — prose/emoji ordering, not a path |
+  | State path wrong in `RESUME:257` + `heartbeat.py:3` | **Yes** |
+
+  Two of three were prose, where the convention is the only workable tool. Recorded so this
+  isn't re-derived.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

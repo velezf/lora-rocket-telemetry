@@ -46,21 +46,30 @@ confirmed against the live V1 sled; OLED + PiSugar on I²C1).
 Wiring: `GPIO → series resistor → LED anode`, `LED cathode → GND`. Drive the GPIO **HIGH**
 to light the LED.
 
-A bring-up sweep (2026-07-07) mapped each GPIO to its **physical** panel position — the
-physical order is **not** the GPIO numeric order (LED3–LED6 were cross-wired in the
-harness). Corrected map, by physical position (LED1 = leftmost, LED6 = rightmost):
+The physical order is **not** the GPIO numeric order (the harness is cross-wired). The
+2026-07-07 bring-up sweep recorded this map **fully reversed** — every row — and it stood
+wrong until **2026-07-31**, when each line was lit *individually* on the bench and its
+position counted. Single-LED probing is the only reliable method here: a running sweep is
+too fast to call, and a whole-panel glance invites exactly the left/right slip that made the
+first map wrong. Map by physical position (LED1 = leftmost, LED6 = rightmost):
 
-| LED (L→R) | Color | BCM GPIO |
-|-----------|-------|----------|
-| LED1 | green | GPIO 5   |
-| LED2 | green | GPIO 6   |
-| LED3 | green | GPIO 13  |
-| LED4 | red   | GPIO 26  |
-| LED5 | blue  | GPIO 12  |
-| LED6 | blue  | GPIO 16  |
+| LED (L→R) | Color | BCM GPIO | Logical (panel supervisor) |
+|-----------|-------|----------|----------------------------|
+| LED1 | blue  | GPIO 16  | `B_RF` — RF trouble         |
+| LED2 | blue  | GPIO 12  | `B_CLOCK` — clock provenance |
+| LED3 | red   | GPIO 26  | `RED` — NOT RECORDING       |
+| LED4 | green | GPIO 13  | `G_FLIGHT` — flight open    |
+| LED5 | green | GPIO 6   | `G_RX` — RX activity        |
+| LED6 | green | GPIO 5   | `G_ALIVE` — alive heartbeat |
 
-Physical layout, left→right: 🟢🟢🟢 🔴 🔵🔵. Firing sequence in physical order:
-GPIO `5, 6, 13, 26, 12, 16`.
+Physical layout, left→right: 🔵🔵 🔴 🟢🟢🟢. Firing sequence in physical order:
+GPIO `16, 12, 26, 13, 6, 5`.
+
+**Logical names bind to POSITION, never to a GPIO number and never to an ordinal** ("the
+first blue" is unresolvable at a physical panel — first from which end?). The authoritative
+copy of this map is `LED_GPIO` / `COLOR` / `lamp_test_order()` in
+[`ground/panel/leds.py`](../ground/panel/leds.py), where a host test enforces that the three
+agree and reproduce the color sequence above; this table is the human-readable mirror.
 
 Bring-up / troubleshoot with [`ground/tools/led_check.py`](../ground/tools/led_check.py),
 whose default pin list is in this physical order.

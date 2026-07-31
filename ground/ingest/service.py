@@ -31,6 +31,7 @@ from ground.dashboard.model import LiveState, view_model, EventsRing
 from ground.dashboard.app import serve, DASHBOARD_PORT
 from ground.oled.render import oled_lines
 from ground.oled.display import OledDisplay
+from ground.panel.heartbeat import HeartbeatPublisher, state_snapshot, STATE_PATH
 from ground.sessionlog.records import event_record, to_jsonl
 
 DATA_DIR = Path(os.environ.get("APOGEE_DATA", str(Path.home() / "apogee-data")))
@@ -158,6 +159,15 @@ def main() -> None:
     if oled is not None:
         registry.register(_oled_update)
 
+    # Heartbeat for the LED supervisor — ticked from INSIDE the RX loop (never a timer
+    # thread), so it proves the loop is TURNING, not merely that the process is up. Publish
+    # is fail-safe: a failure returns False and never escapes into the radio loop (the file
+    # goes stale and the supervisor lights RED — correct degradation while capture continues).
+    heartbeat = HeartbeatPublisher(STATE_PATH, log=lambda m: print(f"[ingest] {m}", flush=True))
+    last_rx_iso = None       # wall time of the last ACCEPTED packet (core.decoded ticks)
+    last_decoded = 0
+    last_hb_mono = None      # monotonic gate for the ~1 Hz publish cadence
+
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -173,6 +183,13 @@ def main() -> None:
                 time.sleep(0.02)
             for fl in live.tick(now, mono):      # cheap step-immune sweep; never blocks RX
                 live_state.reset_baseline(fl.src)   # a closed flight resets its pad/AGL baseline
+            if core.decoded != last_decoded:     # an accepted packet landed this turn
+                last_rx_iso, last_decoded = now, core.decoded
+            if last_hb_mono is None or mono - last_hb_mono >= 1.0:   # ~1 Hz, loop-driven
+                heartbeat.publish(state_snapshot(
+                    ts=now, last_rx_ts=last_rx_iso,
+                    flight_open=bool(live.open_flight_ids())))
+                last_hb_mono = mono
     finally:
         now = now_iso()
         for fl in live.tick(now, time.monotonic()):   # final sweep; still-open flights left OPEN

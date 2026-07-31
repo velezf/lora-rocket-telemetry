@@ -78,3 +78,28 @@ def lamp_test_order() -> list:
     """Power-on sweep order, physical left->right (blue blue red green green green,
     confirmed 2026-07-30). Every LED exactly once so a dead one shows up at boot."""
     return ["B_CLOCK", "B_RF", "RED", "G_ALIVE", "G_RX", "G_FLIGHT"]
+
+
+def lamp_sweep_plan(on_s=1.2, gap_s=0.4, all_on_s=1.5, pass_gap_s=2.0, passes=2) -> list:
+    """Power-on sweep as an ordered list of `(lit_led_names, seconds)` steps. Pure: the Pi
+    shell executes it verbatim, so the pacing is testable instead of being magic sleeps in
+    hardware glue no test can reach.
+
+    Two questions, deliberately separated so the operator answers one at a time:
+      1. "is any LED dead?"  -> the opening all-on frame (position-independent),
+      2. "which GPIO is where?" -> the march, in lamp_test_order().
+
+    Because the march runs in the order we BELIEVE is physical left->right, a correct
+    LED_GPIO map produces a clean uninterrupted L->R march; any wrong assignment shows up
+    as a visible out-of-order jump, which localises the error instead of merely failing.
+    Every lit step is followed by a dark gap (three adjacent greens would otherwise read as
+    one sliding glow), and a longer break separates the confirmation pass from the first.
+    """
+    plan = [(tuple(LEDS), all_on_s), ((), gap_s)]     # all-on: dead-LED check, then dark
+    for p in range(passes):
+        if p:
+            plan.append(((), pass_gap_s))            # unmistakably longer = "new pass"
+        for name in lamp_test_order():
+            plan.append(((name,), on_s))
+            plan.append(((), gap_s))
+    return plan

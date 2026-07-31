@@ -7,7 +7,7 @@ co-assertion so an all-OFF stub cannot satisfy them by accident.
 """
 import itertools
 
-from ground.panel.leds import Blink, LEDS, led_states, lamp_test_order
+from ground.panel.leds import Blink, LEDS, led_states, lamp_test_order, lamp_sweep_plan
 
 
 def base_state():
@@ -168,3 +168,48 @@ def test_lamp_test_covers_all_six_once():
     order = lamp_test_order()
     assert sorted(order) == sorted(LEDS)
     assert len(order) == len(set(order)) == 6
+
+
+# --- lamp-sweep PLAN: the pacing the Pi shell executes verbatim ---
+#
+# The plan is pure so the properties that make the sweep *readable by eye* are pinned by
+# test rather than living as magic sleeps in the hardware shell (which no test can reach).
+
+def _march(plan):
+    """The single-LED steps of a plan, in order, as flat LED names."""
+    return [lit[0] for lit, _ in plan if len(lit) == 1]
+
+
+def test_lamp_sweep_plan_opens_with_every_led_lit_at_once():
+    # Dead-LED detection is a SEPARATE question from position: light all six together so a
+    # dark one is obvious without the operator having to track order at the same time.
+    lit, secs = lamp_sweep_plan()[0]
+    assert sorted(lit) == sorted(LEDS)
+    assert secs > 0
+
+
+def test_lamp_sweep_plan_marches_in_lamp_test_order():
+    # THE pin for "one order, tested, used": the plan the shell executes must march in
+    # lamp_test_order() — a production sweep that ignores the tested order is a fiction.
+    assert _march(lamp_sweep_plan(passes=1)) == lamp_test_order()
+    assert _march(lamp_sweep_plan(passes=2)) == lamp_test_order() * 2
+
+
+def test_lamp_sweep_plan_darkens_between_lit_steps():
+    # Without a dark gap, the three ADJACENT greens read as one sliding glow and the
+    # operator cannot call where one position ends and the next begins.
+    plan = lamp_sweep_plan()
+    for (lit_a, _), (lit_b, _) in zip(plan, plan[1:]):
+        assert not (lit_a and lit_b), f"{lit_a} -> {lit_b} with no dark gap"
+
+
+def test_lamp_sweep_plan_every_step_has_a_positive_duration():
+    assert all(secs > 0 for _, secs in lamp_sweep_plan())
+
+
+def test_lamp_sweep_plan_pass_break_is_longer_than_an_inter_led_gap():
+    # A second pass is the operator's confirmation read; the break must be unmistakably
+    # longer than an inter-LED gap or pass 2 looks like a 7th position.
+    plan = lamp_sweep_plan(passes=2)
+    dark = [secs for lit, secs in plan if not lit]
+    assert max(dark) > min(dark)

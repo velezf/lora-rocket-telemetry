@@ -382,6 +382,33 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   Fix: have `restore_clock`/
   `attest_clock` write the reason INTO the marker (they touch it empty today) so BLUE#1 can blink
   on attest. Small follow-up to the clock module.
+- **`feat/drift-guards` — NOT NOW, deliberately deferred (2026-07-31).** Would pair a
+  non-duplication test with the unit-install guard below. **Deferred because the sanctioned
+  deploy path removes most of the mechanism it would detect:** hand-copying happened because
+  there was no sanctioned route to the Pi; once deploys go through `git pull`, the Pi cannot
+  silently diverge. Building a detector for a failure mode we just designed out is backwards.
+  **Re-evaluate after the deploy path has been used a few times** — if drift appears *despite*
+  it, build then, against real evidence rather than three historical incidents.
+
+  **Design, if it is ever built — INVERT the obvious approach.** The instinct is "assert docs
+  agree with the authoritative constant". Better: **assert docs don't restate it at all.** You
+  cannot detect a *wrong* path by searching for the *right* one — you'd have to shape-match
+  (`/run/apogee[-/][\w-]*\.json`) and compare every hit, which brings regex maintenance and
+  false positives on historical notes. Enforcing *non-duplication* needs no registry of expected
+  values, has almost no false-positive surface, and is ~30 lines. Scope to **literal values
+  only**; see the "cite, don't restate" convention in `CLAUDE.md` (adopted 2026-07-31, free).
+
+  **Why the obvious version was worth less than it looked** — of the three incidents that
+  motivated it, a path-drift test would have caught **one**:
+
+  | Incident | Caught by a path-drift test? |
+  |---|---|
+  | Escape hatch restated across four locations | **No** — prose procedure, no literal to compare |
+  | LED L→R order, `RESUME:63` vs `:270` | **No** — prose/emoji ordering, not a path |
+  | State path wrong in `RESUME:257` + `heartbeat.py:3` | **Yes** |
+
+  Two of three were prose, where the convention is the only workable tool. Recorded so this
+  isn't re-derived.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

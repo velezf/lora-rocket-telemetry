@@ -37,6 +37,23 @@ and the Python decoder (Epic 4.1) both assert against its golden vector. Any cha
 through the ADR + its versioning policy (reject unknown versions; additive tags within a
 version; only breaking changes to existing tags bump `V`).
 
+## Cite, don't restate (doc convention)
+
+**Literal values get stated ONCE, at their authority, and are cited everywhere else** — paths,
+GPIO pins, I²C addresses, ports, thresholds. Write `` the path is `STATE_PATH` in
+`ground/panel/heartbeat.py` `` rather than pasting the path into prose. A fact stated once
+cannot contradict itself; a fact stated four times drifts and is caught only by a human
+happening to notice.
+
+This is not theoretical: on 2026-07-31 three separate instances surfaced in one session — the
+clock escape-hatch procedure across four locations, the panel LED L→R order contradicting
+itself *within* `RESUME.md`, and the heartbeat state path wrong in two places while the
+constant was right. Same discipline ADR 0003 already applies to the escape hatch.
+
+For **prose procedures** (as opposed to literal values), the tool is the same convention, not a
+test: one canonical copy, everything else links to it. No test can judge whether two prose
+procedures mean the same thing.
+
 ## Firmware (PlatformIO)
 
 - **`pio` binary:** `~/.platformio/penv/bin/pio`. Interactive zsh has it on `PATH`;

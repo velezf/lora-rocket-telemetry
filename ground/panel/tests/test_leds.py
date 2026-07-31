@@ -5,6 +5,8 @@ steady-not-recording > off), the BlinkState vocabulary, the fail-closed degradat
 the lamp-test sweep. No hardware in the loop. OFF-asserting cases carry a positive
 co-assertion so an all-OFF stub cannot satisfy them by accident.
 """
+import itertools
+
 from ground.panel.leds import Blink, LEDS, led_states, lamp_test_order
 
 
@@ -84,6 +86,20 @@ def test_fail_closed_snapshot_red_solid_greens_off():
 
 def test_green_alive_heartbeat_when_up():
     assert led_states(base_state())["G_ALIVE"] == Blink.HEARTBEAT
+
+
+def test_green_alive_never_solid_across_all_states():
+    # Self-detecting supervisor liveness: G_ALIVE must be HEARTBEAT or OFF, never SOLID —
+    # a frozen supervisor leaves it stuck solid/dark, which cannot be mistaken for a blink.
+    bools = [False, True]
+    for (alive, wok, sd, low, fo, rx, fg, crc) in itertools.product(bools, repeat=8):
+        for clock in ("rtc", "attested", "unknown"):
+            out = led_states({
+                "ingest_alive": alive, "write_ok": wok, "shutting_down": sd,
+                "battery_low": low, "flight_open": fo, "rx_fresh": rx,
+                "clock": clock, "rf_foreign": fg, "crc_climbing": crc,
+            })
+            assert out["G_ALIVE"] in (Blink.HEARTBEAT, Blink.OFF)
 
 
 def test_green_alive_off_when_down():

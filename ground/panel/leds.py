@@ -16,6 +16,12 @@ This module is clock-free and hardware-free (host-tested, like ground/clock/). T
 Pi-only shell polls the state sources, calls led_states(), drives GPIO, and runs the
 power-on lamp sweep (lamp_test_order) so a dead LED can't hide as a valid OFF/idle state.
 
+G_ALIVE is a HEARTBEAT (blink), NEVER solid — self-detecting one level up: if the supervisor
+process itself freezes, every LED sticks in its last state, and a stuck G_ALIVE reads as
+solid or dark, neither of which is a blink. So the panel reveals a dead *supervisor*, not
+just a dead ingest. Pair with Restart=always on apogee-panel.service. led_states() therefore
+never returns SOLID for G_ALIVE (pinned by test).
+
 Logical LED names (color-based; physical position resolved by the lamp test):
   RED, G_ALIVE, G_RX, G_FLIGHT, B_CLOCK, B_RF
 """

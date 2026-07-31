@@ -1,7 +1,8 @@
 """Ingest-side heartbeat publisher (feat/panel-leds).
 
-ingest publishes /run/apogee-ingest-state.json on a 1 Hz timer (the timer lives in the
-shell) with an atomic temp+rename. The publish is wrapped so no write failure escapes into
+ingest publishes STATE_PATH (below — do not restate the path in prose; it has already
+drifted once) on a 1 Hz tick driven from inside the RX loop, with an atomic temp+rename.
+The publish is wrapped so no write failure escapes into
 the radio loop: on failure the file goes stale and the supervisor lights RED (correct
 degradation — indicator says don't-trust-me while ingest keeps capturing). `ts` (periodic
 liveness) and `last_rx_ts` (traffic) are DISTINCT fields, so a quiet pad stays "alive".

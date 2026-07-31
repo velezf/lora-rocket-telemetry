@@ -230,6 +230,20 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   (~12 glyphs, bold, pure) + **commit one bold pixel TTF** to `ground/oled/fonts/` for small text.
   Render = pure `render(snapshot)->PIL.Image`, golden-image tested. Burn-in: **1 px frame-shift
   every ~30–60 s + dimmed idle contrast** (never blank — blank re-creates "dark looks broken").
+  **Stale hero (lying-display — same class as the flight LED):** if packets stop mid-flight the
+  altitude number **freezes and is visually identical to a live reading**. Needs a freshness
+  treatment on the hero — invert/blink it and/or show a data-age ("2.4s") — gated by a
+  **state-dependent** threshold: silence on the **PAD is normal** (no alarm), silence during
+  **ASCENT/DESCENT is not** (alarm fast). Drive it off `last_rx_ts` age (same field the RX LED
+  uses), threshold = f(flight state). Untreated, a frozen hero is the OLED twin of a lit
+  flight-LED after an ingest crash.
+  **Page selection & persistence:** page is chosen by **flight state, not a timer** — IDLE (no
+  flight open), LIVE (a flight open, any SRC), SUMMARY (after `flight_close`). **SUMMARY holds
+  until the next flight opens — NOT a timeout**: it is what the operator reads walking downrange
+  with the box in hand; a timeout would blank the one number they went to fetch. Multi-SRC: LIVE
+  shows the active SRC (or cycles). **If ingest restarts mid-flight:** derive the current page
+  from the session/flight state at startup (recoverable), **not** in-memory-only flags — a restart
+  must return to LIVE if a flight is still open, not drop the operator back to IDLE.
 - **`feat/panel-leds`** — six front-panel LEDs (GPIO 5/6/13 green, 26 red, 12/16 blue) as an
   operator-glance surface. **Architecture LOCKED** (2026-07-30): a **supervisor** (`apogee-panel`
   systemd unit, independent of ingest) **owns all six GPIO lines**; ingest is only a *state

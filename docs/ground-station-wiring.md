@@ -160,3 +160,8 @@ double-tap as the normal off-switch.
   power-key signal, **not** a raw truncating cut, at least at ~5 s. A genuine truncating cut would
   need a power pull / much longer hold — **not established, not chased** (the graceful path is
   proven, which is what matters). Do not assume this button truncates; the evidence says it didn't.
+
+**Explicit for future readers:** at ~5 s the micro-USB button closed the log **cleanly**. We have
+**NOT established that any hold length force-cuts / truncates** on either button. Do not assume a
+destructive path exists and avoid a harmless action; if a true raw cut is ever needed, it is
+unverified and would require a power pull.

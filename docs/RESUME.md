@@ -244,6 +244,12 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   shows the active SRC (or cycles). **If ingest restarts mid-flight:** derive the current page
   from the session/flight state at startup (recoverable), **not** in-memory-only flags — a restart
   must return to LIVE if a flight is still open, not drop the operator back to IDLE.
+  **REQUIREMENT — render OFF the RX thread (severity: HIGH).** Today `_oled_update` renders
+  *synchronously inside the RX loop*, so a wedged I²C bus (luma write hangs) **halts packet
+  handling** — a ~$10 display fault can stop the box's only job, telemetry capture, and stall
+  the heartbeat into RED. `feat/oled-heartbeat` MUST move rendering to its own thread (RX loop
+  publishes a view-model snapshot; the render thread consumes it), so no display fault can ever
+  block capture. This is a correctness requirement of the epic, not a nicety.
 - **`feat/panel-leds`** — six front-panel LEDs (GPIO 5/6/13 green, 26 red, 12/16 blue) as an
   operator-glance surface. **Architecture LOCKED** (2026-07-30): a **supervisor** (`apogee-panel`
   systemd unit, independent of ingest) **owns all six GPIO lines**; ingest is only a *state
@@ -255,7 +261,7 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   `_oled_update` bug), with `last_rx_ts` a **separate** field; **stale threshold 3 s** (tolerate
   2 missed ticks, avoid flap); **atomic temp+rename**; parse-fail = retain last-good ts (age out,
   don't flip). **Assignment:** RED (supervisor) = NOT RECORDING (ingest down / gate refused /
-  write failing), slow-pulse=shutdown, fast=low-batt; GREEN×3 = alive-heartbeat / RX-blink /
+  **write-failing — NOT YET WIRED**, see below), slow-pulse=shutdown, fast=low-batt; GREEN×3 = alive-heartbeat / RX-blink /
   flight-open (solid, adjacent to RED as the recording-status pair); BLUE#1 = clock provenance
   (solid=RTC, blink=attested, off=unknown); BLUE#2 = RF trouble (foreign OR CRC-climbing=fast).
   **Blink vocab** off/slow/fast/solid + heartbeat; **power-on lamp test** sweeps all six (dead-LED
@@ -263,6 +269,14 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
   host-tested** like the clock work; thin Pi-only GPIO shell. **Doc bug to fix in this branch:**
   the wiring doc's LED physical order is reversed — real panel is 🔵🔵🔴🟢🟢🟢 (confirmed 2026-07-30),
   doc says 🟢🟢🟢🔴🔵🔵; the lamp test pins exact per-position GPIOs, then correct the doc.
+- **Writer health → `write_ok` (RED's write-failing leg is currently INERT).** The pure LED core
+  lights RED SOLID on `write_ok=False` (tested), but the ingest heartbeat publisher **hardcodes
+  `write_ok=True`** — so end-to-end, RED does **NOT** cover a disk-full / failed-write condition
+  today. A designed-but-inert safety signal is worse than an absent one (the panel would read
+  "recording" while nothing lands). Fix: have the queue-backed writer expose a health flag (last
+  append failed / queue overflowing) and feed it into `state_snapshot(write_ok=...)`. **Until
+  then, do not claim RED covers disk-full** — it doesn't. Wire this before relying on the panel
+  for go/no-go.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

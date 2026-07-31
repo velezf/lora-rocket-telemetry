@@ -41,6 +41,9 @@ LEDS = ("RED", "G_ALIVE", "G_RX", "G_FLIGHT", "B_CLOCK", "B_RF")
 
 def led_states(state: dict) -> dict:
     """Pure: system-state snapshot -> {led_name: Blink}."""
+    # NOTE: write_ok is a valid, tested input, but the ingest heartbeat publisher currently
+    # hardcodes write_ok=True — so RED's write-failing leg is INERT end-to-end until the writer
+    # exposes health. Do not claim RED covers disk-full yet. See RESUME "Writer health -> write_ok".
     recording = state["ingest_alive"] and state["write_ok"]
 
     # RED precedence chain: shutdown-pulse > low-batt-fast > steady-not-recording > off.

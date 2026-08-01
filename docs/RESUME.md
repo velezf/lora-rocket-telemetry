@@ -66,6 +66,35 @@ page load** and is **never frozen either way**. That asymmetry is also why a sta
 is invisible on the page: the OJS numbers stay correct while the Python figures go stale — which
 is exactly how preview output got mistaken for CI evidence on 2026-08-01.
 
+### Follow-up decided 2026-08-01: PIN the CI deps (not `freeze: true`)
+
+**This — not the freeze fork — is the real answer to the blast-radius risk.** Verified facts:
+`publish.yml` runs a **full-site `quarto render`** on a **daily cron (`0 6 * * *`)** as well as on
+push; `_quarto.yml` sets no `error: true`, so **one page failing to execute aborts the whole
+render** and the gh-pages deploy step is skipped — **no project deploys**. With
+`pip install … pandas numpy matplotlib seaborn` **unpinned**, an upstream release can fail the
+site on a day nobody touched anything.
+
+**Proposed change** — pin that one line:
+`pip install jupyter nbformat pandas==3.0.3 numpy==2.5.1 matplotlib==3.11.0 seaborn==0.13.2 requests`
+
+**⚠ SHARED-FILE CAVEAT — the reason this needs its own review.** `publish.yml` is shared:
+`el-nino-watch-2026` **also** runs `freeze: false` with its own kernel and **has been rendering
+against `latest` for months**. Pinning to Frank's local macOS versions silently changes what THAT
+page renders against. **Do not fix one exposure by breaking someone else's working page.** The
+proposal must state how we'd know el-nino still renders clean — render it locally against the
+pinned set first, or pin and then watch the next 06:00 UTC cron before trusting it. Evidence
+baseline: **30/30 recent runs succeeded**, so any failure after pinning is attributable.
+
+**Why NOT `freeze: true` for `lora-flights`** (settled 2026-08-01): the two matplotlib charts are
+the *cross-flight* ones whose whole job is to gain a point when a flight is published. Frozen,
+they update only when someone remembers to re-render locally — and since the OJS half reads
+`flights.json` **client-side and is never frozen**, forgetting once yields a page **internally
+inconsistent with itself** (selector and value boxes show the new flight; the charts silently omit
+it). That is worse than either stale-everything or fresh-everything, and far harder to notice.
+Also relevant: the coupling is **pre-existing** (el-nino already carries it) and a failed render
+does **not** take the live site down — gh-pages keeps serving the last good deploy.
+
 **Rules that must survive the context break** — full text under "Working rules":
 - **Admission rule:** admit only if it **(a)** prevents lost flight data, a corrupted record, or
   an ambiguous go/no-go at the pad, **AND (b)** has concrete evidence the failure is real.
@@ -93,9 +122,8 @@ three plan clauses deferred, see Epic status)
 — live Flask/Chart.js dashboard (density pass: header callsign, per-SRC flight badge + live
 age, T+, RSSI sparkline, events feed, health line) + SSD1306 status OLED on `0x3d`, both on a
 per-SRC **AGL pad baseline** (ALT−baseline while `St:0`; raw ALT untouched in records; resets
-on `flight_close`). Bench-verified on `apogee-gs` against live sled telemetry. **Epic 4
-remaining: 4.5 web publish only — NO LONGER GATED on a real flight** (2026-07-31: the Stage-1
-pipeline was run against F1 and emits a complete, honest payload; see Immediate next steps).
+on `flight_close`). Bench-verified on `apogee-gs` against live sled telemetry. **EPIC 4 IS CLOSED (2026-08-01)** — 4.5 published the flight archive on F1
+alone and it is verified live.
 Epic 8 groundwork merged. **`feat/panel-leds` merged 2026-07-31** — six-LED supervisor live and
 enabled for boot.
 
@@ -206,7 +234,10 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
 | 2 — Pi 5 ground-station bring-up | ✅ **CLOSED except 2.2 field verification.** (2.2's own acceptance clause is "verify cold-boot rejoin" and the hotspot field test is still open — calling the epic closed while its acceptance clause is unverified is the same claiming-coverage-we-lack pattern removed from the panel docs 2026-07-31.) **2.5 deviates from the plan BY DESIGN** — raw `spidev`+`lgpio`, not Blinka/`adafruit_rfm9x` (ADR 0002); plan text reconciled 2026-07-31. OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
-| 4 — Ground service (decode/log/dash/web/OLED) | 🟢 **4.1–4.4 done & merged; 4.6 functionally done for `SRC:1` on the bench.** 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **4.6 is NOT done as specified** (re-marked 2026-07-31): three plan clauses are deferred — **multi-node `SRC:2` display → Epic 7** (no lander exists), **"reuses the handheld's OLED rendering" → Epic 8** (no shared module exists), **"cut a window in the front panel" → enclosure** (still benchtop, not boxed). The clause that IS implemented — "driven straight off each decoded packet" — specifies the defect (render on the RX thread, no idle page) and was amended in the plan. **Remaining: 4.5 web publish (UNGATED — publishes on F1 alone).** |
+| 4 — Ground service (decode/log/dash/web/OLED) | ✅ **CLOSED 2026-08-01.** 4.1–4.5 done; 4.6 functionally done for `SRC:1` on the bench (three clauses deferred, below); 4.7 optional, not started. 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **4.6 is NOT done as specified** (re-marked 2026-07-31): three plan clauses are deferred — **multi-node `SRC:2` display → Epic 7** (no lander exists), **"reuses the handheld's OLED rendering" → Epic 8** (no shared module exists), **"cut a window in the front panel" → enclosure** (still benchtop, not boxed). The clause that IS implemented — "driven straight off each decoded packet" — specifies the defect (render on the RX thread, no idle page) and was amended in the plan. **4.5 DONE 2026-08-01** — the archive is live at
+`velezf.github.io/projects/lora-flights.html`, tagged **`v1.0-portfolio-genesis`** in the SITE repo
+(`4a7d15c`), published on F1 alone. **Verified end to end, not merely built** — see the two-proof
+method below. |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
@@ -323,7 +354,27 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 
 ## Immediate next steps
 
-1. **4.5 web publish** (`feat/flight-publish`) — **IN PROGRESS, data-driven model.** `flights
+1. ~~**4.5 web publish**~~ — **DONE 2026-08-01. EPIC 4 CLOSED.** Live at
+   `velezf.github.io/projects/lora-flights.html`; site repo tagged **`v1.0-portfolio-genesis`**
+   (`4a7d15c`). F1 annotated from the ops journal (`flights annotate` → `rebuild`, byte-identical).
+
+   **THE TWO-PROOF PUBLISH METHOD — reuse this, don't re-derive it.** Two risks, orthogonal, each
+   invisible to the other's test; neither substitutes for the other:
+   - **Stale figures (`freeze`)** — invisible on the page, provable ONLY in the **Actions run log**:
+     `Executing 'lora-flights.quarto_ipynb'` + `Cell N/M` under the *Render Quarto site* step.
+     **LOCATION-PINNED:** `quarto preview` prints *character-identical* strings, so terminal output
+     is NOT evidence — the log must come from a real run at
+     `github.com/velezf/velezf.github.io/actions` triggered by a push to `main`. This exact
+     confusion happened on 2026-08-01 and nearly shipped an unverified tag.
+   - **Missing data files (`resources:`)** — invisible in the log, provable ONLY by `curl -sI`
+     against the **`https://velezf.github.io/...`** URLs (not `localhost`). **Capture the 404
+     baseline BEFORE deploying** so the 404→200 transition is itself proof.
+   - **Then verify CONTENT, not just status:** a `200` proves a file exists, not that it is the
+     right file. Fetch the served `flights.json` and confirm the annotation.
+   - Why neither alone suffices: the **OJS half reads `flights.json` client-side and is never
+     frozen**, so page numbers stay correct while Python figures go stale; and a CSV-only 404
+     leaves value boxes populated over three empty charts.
+2. **4.5 (historical detail — data-driven model).** `flights
    publish` ships **DATA ONLY** into the portfolio site (a `flights.json` summary + per-flight
    CSVs under `projects/lora-flights/`) — never a `.qmd`. Stage-1 generator done in
    `ground/publish/` (pure, 8 tests): `flights_summary`, `permalink`

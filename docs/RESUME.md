@@ -280,8 +280,21 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
    Portfolio Workflow doc); the site's action gets **one authorized line** registering that
    kernel in CI (no dep additions — CI already has pandas/numpy/matplotlib/seaborn). Mock built
    with F1's real data on pages-repo branch `feat/flights-section` (committed, **not merged** —
-   Frank reviews + merges + pushes; then **Stage-3 tag** `v1.0-portfolio-genesis`). Local preview:
-   `QUARTO_PYTHON=$(pwd)/.venv/bin/python3 quarto preview projects/lora-flights.qmd`.
+   Frank reviews + merges + pushes; then **Stage-3 tag** `v1.0-portfolio-genesis`). **Local preview — run from the SITE repo** (`~/velezf.github.io`, where the `.qmd`
+   lives), with an absolute path to *this* repo's render venv (verified 2026-08-01; the earlier
+   `$(pwd)/.venv` form was wrong — it silently assumed both repos were one directory, and the site
+   repo has no `.venv` at all):
+   `QUARTO_PYTHON=~/code/lora-rocket-telemetry/.venv/bin/python3 quarto preview projects/lora-flights.qmd`
+   **`QUARTO_PYTHON` is DISCOVERY-ONLY, not execution.** The page declares
+   `jupyter: lora-rocket-telemetry`, so Quarto resolves a *kernelspec by name* and
+   `~/Library/Jupyter/kernels/lora-rocket-telemetry/kernel.json` pins the interpreter as an
+   **absolute path** into this repo's `.venv` — independent of cwd and of `QUARTO_PYTHON`. The env
+   var only gives Quarto a Python that *has* `jupyter` so it can enumerate kernelspecs at all
+   (the system Pythons are bare — the same gap that had no `pytest`).
+   **A clean preview does NOT predict a clean Action run.** It shares kernel-resolution-by-name,
+   cell execution, `freeze:false`, and n=1 chart survival — but it CANNOT test the CI
+   `ipykernel install` step (locally the kernelspec already exists) or the gh-pages deploy.
+   Necessary, not sufficient.
    **4.5 IS UNGATED (2026-07-31).** The old "gated on the first real flight" was never tested —
    the Stage-1 pipeline was run against F1 and emits a **complete, well-formed payload**:
    `peak_agl_ft 10`, `baseline_ft −84`/`baseline_n 15`, `duration_s 87.556`, `packets_rx 75`,

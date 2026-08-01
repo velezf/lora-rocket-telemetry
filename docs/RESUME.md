@@ -17,6 +17,61 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
+## NEXT SESSION — start here
+
+**Next branch: `feat/oled-heartbeat` — THREE admitted items, ONE branch.** Do not start it in a
+session that can't finish RED.
+1. **Periodic redraw** so the display doesn't go dark when the sled is quiet (the defect hit on
+   the bench 2026-07-30 — `_oled_update` renders only on an observation callback, so a quiet pad
+   sits at luma's cleared-black init state and looks dead).
+2. **Idle/quiet page with real content** — ready, waiting for `SRC:1`, clock provenance,
+   RSSI `--`, liveness indicator.
+3. **Render OFF the RX thread** (severity HIGH) — today a wedged I²C bus blocks packet handling,
+   so a *display* fault can stop *telemetry capture*. RX loop publishes a view-model snapshot;
+   a render thread consumes it.
+
+**TDD the pure part** (state → rendered content); keep timer + threading glue thin, like
+`ground/panel/`. Plan first, then RED.
+
+**EXPLICITLY DEFERRED — do NOT build** (this is the redesign, not the fix): 28 px hero digits,
+hand-drawn digits, committed bitmap font, golden-image tests, the three-page system, page
+transitions/persistence, RSSI sparkline, burn-in mitigation, stale-hero treatment.
+
+**After the OLED fix: Epic 6 (relay deployment)** — safety-critical, gets the slot while
+attention is fresh. Epic 6 **before** Epic 7 (separation at main requires deployment to work).
+
+### Architecture question to ANSWER next session (not now): Quarto render source of truth
+
+**The mental model was wrong, so rebuild from this.** Frank had been carrying: *the page is built
+in the telemetry repo and copied to the site repo for CI to publish.* **What is actually built:**
+`projects/lora-flights.qmd` lives in the **site repo** (`~/velezf.github.io`), and CI
+**re-executes the Python on every push** (`freeze: false`) — with **unpinned**
+`pandas numpy matplotlib seaborn` resolving *latest at run time* on **Ubuntu / Python 3.11**,
+while Frank develops on **macOS / pandas 3.0.3**. The telemetry repo ships **DATA ONLY**
+(`flights.json` + per-flight CSV) via Stage-1 `flights publish`; it never writes `.qmd`.
+
+**The fork to decide:**
+- **Keep `freeze: false`** — CI is the render source of truth and auto-rebuilds on every data
+  push; but the render env drifts from Frank's (unpinned deps, different OS/Python), and
+  `_freeze/` must stay gitignored (guard added 2026-08-01: `_freeze/projects/lora-flights/`).
+- **Switch to `freeze: true` with committed `_freeze/`** — Frank renders locally with the real
+  telemetry venv (one env, reproducible, matches what he tests against) and CI needs no Python,
+  no kernel, no deps at all; but figures only update **when he remembers to re-render**, and
+  **stale output becomes possible again** — the exact failure this session was designed to
+  prevent.
+
+**Scope of the decision — it governs ONLY the two matplotlib charts.** The OJS half (value boxes,
+selector, summary line, the three Plot traces) reads `flights.json` and the CSV **client-side at
+page load** and is **never frozen either way**. That asymmetry is also why a stale-figure failure
+is invisible on the page: the OJS numbers stay correct while the Python figures go stale — which
+is exactly how preview output got mistaken for CI evidence on 2026-08-01.
+
+**Rules that must survive the context break** — full text under "Working rules":
+- **Admission rule:** admit only if it **(a)** prevents lost flight data, a corrupted record, or
+  an ambiguous go/no-go at the pad, **AND (b)** has concrete evidence the failure is real.
+- **Budget rule:** at most **one correctness branch + one hardening branch** open at a time.
+- New ideas go to Backlog, not explored inline.
+
 ## Where we are
 
 **Epics 1–3 complete; Epic 4 (ground service) substantially built and merged.** Epic 1
@@ -509,6 +564,13 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   Pi; the site repo lives on the Mac (`~/velezf.github.io`), so every `flights publish` needs a
   data transfer. Worked fine as a one-off on 2026-08-01, but decide where this workflow lives
   before the ad-hoc `scp` becomes habit.
+- **CI kernel assertion (`jupyter kernelspec list | grep -q lora-rocket-telemetry`) — NOT NOW.**
+  A missing kernel surfaces as a confusing *render* failure, not at the registration step that
+  caused it; the one-line grep is an **assertion** (fails at the right place) rather than a
+  **diagnostic** (dumps output nobody reads — and unread output stops being read even when it
+  matters). Deliberately deferred: by the admission rule it fails clause (a) — it prevents a
+  confusing debug session, not lost flight data. **Trigger to build it: the kernel step proving
+  flaky across runs.** Recorded so the probe-vs-assertion reasoning isn't re-derived.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

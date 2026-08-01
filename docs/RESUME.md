@@ -66,6 +66,14 @@ page load** and is **never frozen either way**. That asymmetry is also why a sta
 is invisible on the page: the OJS numbers stay correct while the Python figures go stale — which
 is exactly how preview output got mistaken for CI evidence on 2026-08-01.
 
+### Where the tag lives: `v1.0-portfolio-genesis` is on THIS repo, not the site repo
+
+**`v1.0-portfolio-genesis` tags `lora-rocket-telemetry` at `42eacb5`.** It was briefly placed on
+`velezf.github.io` on 2026-08-01 and **moved** (deleted local + remote, re-tagged here) the same
+day. **The tag marks a state of the SYSTEM that produced the data** — firmware, packet contract,
+RX driver, ground service, storage model, hardening, panel — **not a state of a website**. The
+site repo is a *publishing surface*; it carries no tags. Do not re-tag it.
+
 ### Follow-up decided 2026-08-01: PIN the CI deps (not `freeze: true`)
 
 **This — not the freeze fork — is the real answer to the blast-radius risk.** Verified facts:
@@ -84,7 +92,9 @@ against `latest` for months**. Pinning to Frank's local macOS versions silently 
 page renders against. **Do not fix one exposure by breaking someone else's working page.** The
 proposal must state how we'd know el-nino still renders clean — render it locally against the
 pinned set first, or pin and then watch the next 06:00 UTC cron before trusting it. Evidence
-baseline: **30/30 recent runs succeeded**, so any failure after pinning is attributable.
+baseline: **30/30 recent runs succeeded**, and on the very run that published the flight archive
+(`30714197232`, 2026-08-01) **`el-nino-watch-2026` rendered CLEAN — `Cell 1/8`..`8/8`** against
+current `latest`. That is the pre-pin baseline: if el-nino breaks after pinning, the pin caused it.
 
 **Why NOT `freeze: true` for `lora-flights`** (settled 2026-08-01): the two matplotlib charts are
 the *cross-flight* ones whose whole job is to gain a point when a flight is published. Frozen,
@@ -235,8 +245,9 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | 2 — Pi 5 ground-station bring-up | ✅ **CLOSED except 2.2 field verification.** (2.2's own acceptance clause is "verify cold-boot rejoin" and the hotspot field test is still open — calling the epic closed while its acceptance clause is unverified is the same claiming-coverage-we-lack pattern removed from the panel docs 2026-07-31.) **2.5 deviates from the plan BY DESIGN** — raw `spidev`+`lgpio`, not Blinka/`adafruit_rfm9x` (ADR 0002); plan text reconciled 2026-07-31. OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
 | 4 — Ground service (decode/log/dash/web/OLED) | ✅ **CLOSED 2026-08-01.** 4.1–4.5 done; 4.6 functionally done for `SRC:1` on the bench (three clauses deferred, below); 4.7 optional, not started. 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **4.6 is NOT done as specified** (re-marked 2026-07-31): three plan clauses are deferred — **multi-node `SRC:2` display → Epic 7** (no lander exists), **"reuses the handheld's OLED rendering" → Epic 8** (no shared module exists), **"cut a window in the front panel" → enclosure** (still benchtop, not boxed). The clause that IS implemented — "driven straight off each decoded packet" — specifies the defect (render on the RX thread, no idle page) and was amended in the plan. **4.5 DONE 2026-08-01** — the archive is live at
-`velezf.github.io/projects/lora-flights.html`, tagged **`v1.0-portfolio-genesis`** in the SITE repo
-(`4a7d15c`), published on F1 alone. **Verified end to end, not merely built** — see the two-proof
+`velezf.github.io/projects/lora-flights.html`, published on F1 alone and tagged
+**`v1.0-portfolio-genesis` in THIS repo at `42eacb5`** (moved off the site repo 2026-08-01 —
+see "Where the tag lives"). **Verified end to end, not merely built** — see the two-proof
 method below. |
 | 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
@@ -355,8 +366,7 @@ swing, not a climb; the 10 ft "peak" is sensor noise. A real *trajectory* awaits
 ## Immediate next steps
 
 1. ~~**4.5 web publish**~~ — **DONE 2026-08-01. EPIC 4 CLOSED.** Live at
-   `velezf.github.io/projects/lora-flights.html`; site repo tagged **`v1.0-portfolio-genesis`**
-   (`4a7d15c`). F1 annotated from the ops journal (`flights annotate` → `rebuild`, byte-identical).
+   `velezf.github.io/projects/lora-flights.html`; tagged **`v1.0-portfolio-genesis`** in **THIS repo** at `42eacb5`. F1 annotated from the ops journal (`flights annotate` → `rebuild`, byte-identical).
 
    **THE TWO-PROOF PUBLISH METHOD — reuse this, don't re-derive it.** Two risks, orthogonal, each
    invisible to the other's test; neither substitutes for the other:

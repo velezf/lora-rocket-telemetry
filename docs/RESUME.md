@@ -484,6 +484,18 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
 
   Two of three were prose, where the convention is the only workable tool. Recorded so this
   isn't re-derived.
+- **The ops journal is the ONLY irreplaceable artifact in the system — it has no backup.**
+  Everything else regenerates: sessions are raw capture, flights are derived, and the index
+  rebuilds byte-identically from `derive(session, ops)`. **Annotations are human input and live in
+  exactly one place — `~/apogee-data/ops-journal.jsonl` on an SD card.** Losing that card re-opens
+  the very un-re-derivability gap closed on 2026-08-01 (the published `flights.json` carried
+  annotations that no journal could reproduce). Distinct from the data-hop item below: that one is
+  about workflow convenience, this one is about permanent loss of the only non-reproducible data
+  in the project. Decide a backup/commit strategy.
+- **Publish data hop — decide a home for the workflow.** The ops journal and sessions live on the
+  Pi; the site repo lives on the Mac (`~/velezf.github.io`), so every `flights publish` needs a
+  data transfer. Worked fine as a one-off on 2026-08-01, but decide where this workflow lives
+  before the ad-hoc `scp` becomes habit.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same
@@ -519,6 +531,14 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
 
 ## Notes / gotchas
 
+- **The data store on `apogee-gs` (`~/apogee-data/`) — four files, four owners.** `session-*.jsonl`
+  ← the ingest service (raw capture). **`ops-journal.jsonl` ← the flights CLI** (human annotations;
+  created 2026-08-01). `flights.json` ← **derivation only** — it is `rebuild` = `derive(session, ops)`
+  and is rewritten wholesale, never edited (verified byte-identical across repeated rebuilds).
+  **`flights-snapshot.json` ← the INGEST SERVICE** (`LiveFlights`), an advisory live snapshot —
+  **do NOT hand-edit it and do not mistake it for the index**: as of 2026-08-01 it is stale
+  (`duration_s 88.283`, no baseline fields — it predates AGL baseline v2), so publishing from it
+  would ship wrong numbers.
 - **Bench-artifact sessions:** session logs produced by bench tests (not flights) are registered
   in [`docs/bench-sessions.md`](bench-sessions.md) — the canonical, append-only provenance list so
   they aren't mistaken for real telemetry. Add a row per bench session; don't restate elsewhere.

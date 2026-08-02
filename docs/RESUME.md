@@ -874,28 +874,46 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   property that the ground station currently CANNOT transmit. Improve (a) by interleaving chunks
   with live telemetry and rotating chunk order between passes, so the three passes fail
   independently against fading instead of all missing the same fade.
-- **BLOCKER ON THE EPIC 6 `CALL` BEACONING RIDER — a beacon silently inflates published packet
-  loss (DEMONSTRATED 2026-08-02, not theorised).** A beacon frame is `V:1 SYS:7 SRC:1 CALL:...`
-  with **no `ALT`/`St`**. Three things were checked and the first two are FINE:
-  1. The decoder does **not** error — `missing tags are valid` is documented policy
-     (`ground/decode/v1.py:10`) and `CALL` already rides the unknown-tag path
-     (`ground/ingest/core.py:61`). "Beaconing inflates decode errors" is NOT the failure.
-  2. `ObserverRegistry.dispatch` isolates consumers, so the radio loop does **not** crash.
-  3. **The real failure — partial mutation under a swallowed exception.**
-     `FlightSegmenter.observe()` mutates in this order: `t_end` -> `packets += 1` ->
-     `peak_alt = max(peak_alt, alt)` **<- raises `TypeError: '>' not supported between NoneType
-     and int`** -> `last_seq = seq` **never runs**. The registry swallows it with a bare `pass`
-     (no log, no counter), so `last_seq` stays stale and **the NEXT real packet counts a phantom
-     gap**. Verified by running it: identical received frames give `lost=0` with telemetry in
-     slot 4 and `lost=1` with a beacon there. **On a 75-packet flight that is ~1.3% phantom loss
-     — the same magnitude as F1's real published 1.32%.**
-  **Admission: passes (a)** — corrupts `loss_pct`, a published number, invisibly. **Passes (b)
-  with a demonstration**, which is stronger evidence than the `Max` item has.
-  **Fix is small and belongs BEFORE beaconing lands:** guard `observe()` against `alt is None`
-  (a frame with no altitude is not a flight observation — skip the vehicle fields but still
-  advance `last_seq`, since the frame WAS received and consumed a sequence number). Cheapest
-  correct shape: validate/normalise at the top of `observe()`, never mutate then raise.
-  See the C2 entry for the general frame-type analysis — **do not restate it here**.
+- **BLOCKER ON EPIC 6 (`CALL` beaconing) AND LIKELY EPIC 7 (lander) — a frame missing `SEQ`
+  or `ALT` corrupts published numbers catastrophically. MEASURED 2026-08-02 through the REAL
+  consumer path.**
+  **CORRECTION to an earlier entry in this file:** the defect is NOT partial mutation in
+  `FlightSegmenter.observe()`. That path is UNREACHABLE from the live flow, because
+  `ground/flights/live.py:38-39` already coalesces. The first demonstration called `observe()`
+  directly and bypassed the very guard that exists — a badly constructed test, corrected here.
+  **The real defect is SENTINEL COALESCING — `None -> 0`, where `0` is a VALID value for both
+  fields.** `on_observation` does `f.get("ALT") if ... else 0` and `f.get("SEQ") if ... else 0`.
+  Consequences, measured on identical received frames with one beacon substituted mid-flight:
+  | field | telemetry | CALL beacon |
+  |---|---|---|
+  | `packets_lost` | 0 | **65,536** (`gaps += (0 - last_seq - 1) % 65536` wraps) |
+  | `peak_alt_ft` (F1-shaped, negative raw) | -74 | **0** |
+  | published peak AGL | 10 ft | **84 ft** |
+  `loss_pct` would read ~100%. The `+84` is the SAME shape as the `Max:0` trap in the `Max`
+  item — different code path, identical cause: a sentinel that collides with a legal value.
+  **NOT LIVE TODAY.** Three gates prevent it: `firmware/lib/packet/packet.cpp` emits `SEQ` and
+  `ALT` unconditionally; the RX driver is CRC-enforcing so truncated frames never decode; and
+  foreign-SYS / unknown-SRC are filtered upstream. It arrives with **beaconing (Epic 6)** and
+  plausibly the **lander (Epic 7)**, whose packet carries BME/APDS fields and may omit `ALT`.
+  **Fix:** stop coalescing. `observe()` should take optional values and SKIP the fields it cannot
+  compute, while advancing `last_seq` only when a real `SEQ` is present. Bundle with the `Max`
+  item — same trap, same module, one review. **Defence in depth, separately worth doing:** make
+  `observe()` atomic (compute, then commit) so no future raise can leave half-mutated state.
+- **`ObserverRegistry.dispatch` swallows consumer failures with NO counter and NO log.** The
+  isolation is correct and deliberate (D4: one bad consumer must never take down the radio loop),
+  but `except Exception: pass` means a consumer can fail on EVERY packet and nothing anywhere
+  says so. It hides failures in every consumer — OLED, dashboard, LiveFlights.
+  **Wiring assessment — do NOT route this to RED.** RED means exactly one thing: NOT RECORDING.
+  A consumer failure does not stop recording: the session log is written by `sink` inside
+  `core.handle`, **not** through the registry, so raw packets still land durably and an offline
+  `rebuild` still yields a correct index. Firing RED on a consumer error would make it lie while
+  recording is fine. It also must NOT be used to "activate" RED's INERT write-failure leg — that
+  leg needs the queue-backed WRITER's health flag, the actual not-recording condition; substituting
+  a different signal would make RED mean two things and neither precisely, on the highest-stakes
+  indicator on the panel.
+  **Correct home:** a `consumer_errors` counter (per-observer) in the ingest heartbeat state file
+  as DATA, plus the dashboard health dict alongside `decode_errors`, plus journald. Counted and
+  visible, not an LED. Makes a whole class of future consumer bugs self-reporting.
 - **ADR amendment: classify FRAME TYPE before interpreting fields (arrives WITHOUT C2).** The
   frame-type problem is on a path we are actually taking, not a hypothetical one: `CALL`
   beaconing is an Epic 6 rider and produces exactly the no-`ALT`/no-`St` shape analysed under C2.

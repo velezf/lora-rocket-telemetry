@@ -29,8 +29,10 @@ from ground.ingest.core import IngestCore
 from ground.flights.live import LiveFlights
 from ground.dashboard.model import LiveState, view_model, EventsRing
 from ground.dashboard.app import serve, DASHBOARD_PORT
-from ground.oled.render import oled_lines
 from ground.oled.display import OledDisplay
+from ground.oled.spec import frame_spec
+from ground.oled.draw import render
+from ground.clock.gate import MARKER as CLOCK_MARKER   # cite, don't restate the /run path
 from ground.panel.heartbeat import HeartbeatPublisher, state_snapshot, STATE_PATH
 from ground.sessionlog.records import event_record, to_jsonl
 
@@ -139,6 +141,14 @@ def main() -> None:
     threading.Thread(target=_serve, daemon=True).start()
     print(f"[ingest] dashboard on :{DASHBOARD_PORT}", flush=True)
 
+    OLED_REDRAW_S = 1.0     # traffic-independent redraw cadence (also the re-init cadence)
+
+    def _clock_provenance():
+        """What the display should say about the clock. Marker present -> the clock was
+        established (RTC restore OR operator attest); the marker is an empty touch file so
+        those two cannot be told apart — see RESUME "Panel signals designed but INERT"."""
+        return "rtc" if os.path.exists(CLOCK_MARKER) else "unknown"
+
     # Status OLED (Pi-only, I2C 0x3d). Construction probes the address; a missing or
     # failing OLED degrades silently and never touches the radio.
     oled = None
@@ -148,16 +158,41 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 — OLED must never take down the radio owner
         print(f"[ingest] OLED off: {exc}", flush=True)
 
-    def _oled_update(obs):
-        if oled is None:
-            return
-        src = obs.packet.fields.get("SRC")
-        panel = next((p for p in _view_model()["panels"] if p["src"] == src), None)
-        if panel:
-            oled.show(oled_lines(panel))
+    # RENDER OFF THE RX THREAD (correctness requirement, not a nicety).
+    #
+    # This used to be registry.register(_oled_update): the OLED drew SYNCHRONOUSLY inside
+    # the RX loop, so a wedged I2C bus (a luma write that never returns) halted packet
+    # handling — a ~$10 display fault could stop the box's only job and stall the heartbeat
+    # into RED. Now the RX loop only PUBLISHES an immutable snapshot; a daemon thread is
+    # the only thing that ever touches luma. A hung write blocks that thread alone.
+    #
+    # The holder is a bare attribute rebind: assignment is atomic under the GIL and the
+    # payload is an immutable FrameSpec input, so no lock is needed and the RX loop can
+    # never block on the reader.
+    class _Latest:
+        __slots__ = ("view",)
 
-    if oled is not None:
-        registry.register(_oled_update)
+        def __init__(self):
+            self.view: dict | None = None
+
+    latest = _Latest()
+
+    def _render_loop():
+        """~1 Hz redraw, independent of traffic. Draws even when NOTHING is arriving —
+        that is the whole point: a quiet pad used to leave the panel at luma's cleared
+        state, which reads as a dead box. Each frame re-inits the display (see display.py)
+        so a power-cycled OLED recovers on its own."""
+        if oled is None:            # the thread is only started when it isn't, but be explicit
+            return
+        tick = 0
+        while not stop.is_set():
+            try:
+                spec = frame_spec(latest.view, clock=_clock_provenance(), tick=tick)
+                oled.show_image(render(spec))
+            except Exception as exc:  # noqa: BLE001 — the render thread must never die
+                print(f"[ingest] oled render error: {exc}", flush=True)
+            tick += 1
+            stop.wait(OLED_REDRAW_S)
 
     # Heartbeat for the LED supervisor — ticked from INSIDE the RX loop (never a timer
     # thread), so it proves the loop is TURNING, not merely that the process is up. Publish
@@ -171,6 +206,10 @@ def main() -> None:
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    if oled is not None:    # daemon: a wedged I2C write must never delay shutdown either
+        threading.Thread(target=_render_loop, name="oled-render", daemon=True).start()
+        print(f"[ingest] OLED render thread at {1 / OLED_REDRAW_S:.0f} Hz", flush=True)
 
     try:
         while not stop.is_set():
@@ -189,6 +228,7 @@ def main() -> None:
                 heartbeat.publish(state_snapshot(
                     ts=now, last_rx_ts=last_rx_iso,
                     flight_open=bool(live.open_flight_ids())))
+                latest.view = _view_model()   # publish for the OLED render thread; atomic
                 last_hb_mono = mono
     finally:
         now = now_iso()

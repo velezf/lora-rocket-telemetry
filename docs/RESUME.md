@@ -199,8 +199,13 @@ says so) and deliberately does **not** carry `pytest`; mixing them would repeat 
 one-writer-per-file mistake in another form. Recreate with:
 
 ```
-python3 -m venv .venv-test && .venv-test/bin/python -m pip install pytest
+python3 -m venv .venv-test && .venv-test/bin/python -m pip install pytest pillow
 ```
+
+**`pillow` added 2026-08-02** for the OLED drawing layer (`ground/oled/draw.py` renders a
+128x64 1-bit image). Pinned to nothing, but the host and the Pi's `gs-venv` both currently carry
+**12.3.0** — worth keeping aligned, since the redesign's golden-image tests will compare pixels
+across the two machines.
 
 **Rebuild implication:** a fresh Mac (or a wiped repo) has **no** pytest anywhere until this is
 recreated — on 2026-07-31 pytest was absent from `.venv`, system `python3`, Homebrew, pyenv,
@@ -632,6 +637,42 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   matters). Deliberately deferred: by the admission rule it fails clause (a) — it prevents a
   confusing debug session, not lost flight data. **Trigger to build it: the kernel step proving
   flaky across runs.** Recorded so the probe-vs-assertion reasoning isn't re-derived.
+- **OLED redesign — three design gaps to close BEFORE building (raised 2026-08-02).** None are
+  in the fix branch; all three are item-3 design decisions.
+  1. **Digit overflow on the hero.** A 28 px hero fits ~4 digits. An L1 flight above **9,999 ft
+     has no defined behaviour** — shrink the font, switch to `10.2k`, or clip? That is precisely
+     the flight where the display most needs to work. Note the overflow policy belongs in the
+     PURE layer (`_hero()` in `ground/oled/spec.py`), where it is testable; the drawing layer
+     only picks a font size.
+  2. **Trend-strip window — sample-based or time-based?** At 1 Hz, ~60 samples is the last
+     minute: fine up to apogee, but **flat for the whole descent under chute**, when the strip
+     would show nothing useful for minutes.
+  3. **Hero freshness (the highest-consequence remaining lie).** If packets stop mid-flight the
+     hero **freezes and is visually identical to a live reading** — the same lying-display class
+     removed from the LEDs (a lit flight LED after an ingest crash). Needs a freshness treatment
+     driven off `last_rx_ts` age with a **state-dependent** threshold: silence on the PAD is
+     normal, silence during ASCENT/DESCENT is not.
+- **OLED multi-SRC page cycling.** The LIVE page currently shows ONE panel, chosen by a rule
+  that is **forced, not chosen**: with rendering moved off the RX thread there is no observed
+  packet whose SRC keys the display, so `_pick()` prefers a panel with `flight_open`, else the
+  lowest SRC. Cycling between multiple SRCs (rocket + lander) is a redesign idea and waits for
+  Epic 7 to make a second node exist.
+- **Consolidate the `/run/apogee-rtc-restored` marker path — FOUR restatements, own review.**
+  The clock-trust marker is written out as a literal in `ground/panel/run_panel.py`,
+  `ground/clock/gate.py`, `ground/clock/restore_clock.py` and `ground/clock/attest_clock.py` — a
+  live **cite-don't-restate** violation of exactly the kind the convention was adopted for
+  (2026-08-01). `ground/ingest/service.py` deliberately did NOT add a fifth: it imports
+  `MARKER` from `ground.clock.gate` (2026-08-02). **Consolidating the other four touches the
+  FAIL-CLOSED CLOCK GATE, so it gets its own branch and its own review — do not fold it into an
+  unrelated branch.** Pick one owner (`gate.py` reads it, `restore_clock`/`attest_clock` write
+  it) and import everywhere else.
+- **Two pre-existing pyright errors (introduced with `feat/panel-leds`, unnoticed).**
+  `ground/panel/tests/test_heartbeat.py:11` — `pytest` unresolved, because pyright runs against
+  an interpreter without it (`.venv-test` isn't in `pyrightconfig.json`); and
+  `ground/panel/tests/test_supervisor.py:94` — `None` passed to a `float` parameter. Verified
+  present on clean `main`. The repo used to report **pyright 0**, so this is drift: pyright is
+  not part of any gate, and nothing ran it on that branch. Fix both, and consider adding
+  `venvPath`/`venv` to `pyrightconfig.json` so the pytest import resolves.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

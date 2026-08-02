@@ -759,6 +759,158 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   present on clean `main`. The repo used to report **pyright 0**, so this is drift: pyright is
   not part of any gate, and nothing ran it on that branch. Fix both, and consider adding
   `venvPath`/`venv` to `pyrightconfig.json` so the pytest import resolves.
+- **A — GROUND MUST USE THE SLED'S `Max`, NOT `max(received ALT)` (ADMISSIBLE; queue after the
+  OLED redesign, AHEAD of pin-the-deps).** `ground/flights/segmenter.py:78` computes
+  `fl["peak_alt"] = max(fl["peak_alt"], alt)` from RECEIVED packets, while the dashboard/OLED use
+  the sled's onboard `Max` (`ground/dashboard/model.py:79`). **Two peaks, two answers.** The sled
+  already computes a running max at its sampling rate and transmits it in EVERY packet, so the
+  ground needs any ONE post-apogee packet to be correct — whereas `max(received ALT)` loses the
+  peak to a single drop at the wrong instant, silently, on the headline number of a public page.
+  **Admission: passes (a)** — a corrupted published record. **Passes (b)** — not an observed wrong
+  number (F1 agrees at -74 by luck) but a demonstrably present mechanism: F1 lost 1 of 76 packets
+  (1.32%) and loss near apogee is the likely case. A signal that actively lies; the lie has not
+  been called yet.
+  **TRAP — `Max:0` is not a sentinel.** The firmware sends `Max:0` before launch and **0 is a
+  valid altitude**. Naively maxing `Max` over F1 yields `0`, which against baseline -84 would
+  publish **+84 ft AGL** for a flight that reached 10. Any switch MUST ignore `Max` while `St==0`.
+  Cost: ~10 lines + tests, no firmware, no airtime, no ADR change.
+- **B-decoupled — SEPARATE THE SAMPLE RATE FROM THE TX RATE IN `loop()`.** Today they are the
+  same thing: `firmware/src/main.cpp` `loop()` reads BMP+ADXL, updates the detectors, transmits,
+  then `delay(1000)`. One loop = one sample = one packet, so the detectors see **1 sample/second**
+  — which is why the 2026-07-08 shake test's 2.2 g hand-jerk was missed between samples. Sample
+  at ~20 Hz and transmit every 20th iteration: detectors and onboard `Max` run at 20 Hz, airtime
+  is unchanged, no hardware, no wire-format change. ~15 lines.
+  **Note the chicken-and-egg that kills the simpler idea:** a `St`-dependent TX rate (the Epic 6
+  rider) canNOT improve launch detection, because you must DETECT launch to switch rates and
+  detection runs at the slow rate. It improves boost/coast profile fidelity only.
+  **AIRTIME FACTS (measured 2026-08-02, not estimated).** SF7 / BW125 / CR4/5, real payload
+  82-88 B (+4 RadioHead) ~= 92 B -> **ToA 159 ms**, **max ~6.3 packets/s**, **duty at 1 Hz =
+  15.9%**. So **10 Hz is NOT achievable at this config** — 5 Hz (79% duty) is the ceiling; 10 Hz
+  would need BW250 (-3 dB) or a shorter boost-mode payload (-> ADR bump). SF trade, ~2x airtime
+  per step for ~+2.5 dB: SF8 287 ms / 3.5 per s · SF9 513 ms / 2.0 · SF10 944 ms / 1.06.
+  **Part 97 under KC3ZTQ: NO duty-cycle regulation applies** (that is an EU 868 ISM rule). The
+  only limits are airtime, link budget, and the 10-minute station ID already handled.
+- **C — onboard high-rate logging (NICE-TO-HAVE, NOT on the honesty path).** **A + B-decoupled
+  already make the published peak accurate to 20 Hz sampling and effectively loss-proof** (it
+  needs one post-apogee packet). Peak is the only published figure at risk — duration is
+  timestamp-derived, loss% is SEQ-derived, RSSI is link-side. **So logging buys the high-rate
+  CURVE, not honest NUMBERS.**
+  **Memory, measured from the build (`pio run -e feather_m0_tx`), not the datasheet:** SAMD21G18A,
+  32,768 B SRAM / 262,144 B flash, no SD, no SPI flash. Static use **5,736 B (17.5%)**, flash
+  55,868 B (21.3%) — so ~27 KB nominally free, but the Arduino SAMD linker reserves **8 KB of
+  stack**, leaving **~18.8 KB safely usable**. ~206 KB of flash is unused.
+  **Record budget for a ~120 s L1 flight:** at a FIXED rate, time is implicit in the index (saves
+  4 B/sample). 2,400 samples @ 4 B (`alt`,`g`) = 9,600 B (fits); @ 6 B (+`pg`) = 14,400 B (tight);
+  @ 8 B = 19,200 B (over). **MIXED RATE WINS BY 3-6x:** 20 Hz through boost+coast (15 s = 300) +
+  1 Hz under chute (85 s = 85) = **385 samples; at 8 B with an explicit timestamp = 3,080 B**,
+  leaving ~15.7 KB margin.
+  **Two catches.** (1) **SRAM is volatile and the loss window IS the danger moment** — a brownout
+  or reset on LANDING SHOCK destroys the record, which is disqualifying for "the record" and fine
+  for "a chart". Mitigation: dump to flash **at apogee**, not at landing — the vehicle is quietest
+  and boost+coast is already complete. (2) **USB download after every flight** is friction and a
+  manual step that will eventually be forgotten (same reliability shape as remembering to
+  re-render `_freeze`), plus a firmware command handler and a ground-side import path.
+  **Storage model if ever built:** NOT a fourth writer — a new **immutable derivation input**
+  (`index = f(session, ops, recovered?)`), so one-writer-per-file survives and byte-identical
+  rebuild survives provided the recovered file is immutable and versioned. **Never merge it into
+  the session log**, which must keep meaning "what the ground heard" or the link record is
+  destroyed. **`SEQ` is the join key** (the onboard clock is `millis()`, the ground's is wall
+  time). **Provenance is mandatory** — each value must record air-vs-card, or a recovered peak is
+  indistinguishable from a received one.
+- **C2 — RADIO DUMP of the in-RAM high-rate buffer (refinement of C; still NOT on the honesty
+  path).** Buffer 20 Hz in RAM, replay it over the radio DURING DESCENT, no flash and no USB step.
+  Strictly better than C: it removes the manual download and the landing-shock bet. **But with
+  B-decoupled, onboard `Max` is already 20 Hz-accurate and transmitted every packet, so the dump
+  improves ZERO published numbers.** It buys the CURVE between samples. Work estimate: **5-10x A**
+  (firmware ring buffer + chunked dump protocol + ADR amendment + decoder frame-type classifier +
+  ground collector + join/validate + coverage-aware derivation + hash provenance) for no accuracy
+  gain. Build only if the high-rate curve is wanted for its own sake.
+  **DUMP DURING DESCENT, not after landing.** Landing is the worst moment — vehicle horizontal,
+  antenna in grass, max downrange, possibly behind terrain — and landing shock is the event most
+  likely to brown out the MCU, so post-landing dumping bets the record on surviving the riskiest
+  event first. Under chute: ~85 s, high, line-of-sight, slow and roughly upright (better antenna
+  orientation than tumbling coast), with boost+coast already complete in the buffer. Residual
+  volatility risk shrinks from "landing shock" (likely) to "brownout during boost" (much less so).
+  **Limits:** a 500 ft flight gives a ~28 s descent = one pass only; **a chute failure gives ~10 s
+  ballistic and essentially no dump** — precisely the flight you would most want it from.
+  **AIRTIME (measured 2026-08-02).** 3,080 B binary -> 4,108 chars base64 (+33%). RadioHead allows
+  **251 B frames** vs the 92 B used today, which more than compensates: **21 packets, ToA 394 ms,
+  8.3 s total**. Descent budget: 1x = 9.7% duty, **3x = 29.2% (+15.9% live = 45.1%)**. Three
+  redundant passes fit comfortably.
+  **It is a JOIN, not a merge — one authoritative source per field.** LINK fields (RSSI, loss,
+  timing) come from the session ONLY and always: the vehicle cannot know its own RSSI. VEHICLE
+  fields (alt, g, pg) come from the dump where covered AND validated, else the session. The
+  session log must keep meaning "what the ground heard" or the link record is destroyed.
+  **SEQ join:** do NOT infer anchors — the firmware knows `(buffer_index, SEQ)` at TX time and
+  must record them explicitly; inference breaks on any skipped or delayed TX. SEQ wrap is a
+  non-issue within a flight (65535 at 1 Hz = 18.2 h); guard with a monotonicity check, and a
+  decreasing SEQ invalidates the join. **Start buffering AT LAUNCH DETECT** so the buffer can
+  never start mid-flight, plus a ~2 s / 40-sample / 320 B pre-launch ring to capture the launch
+  transient that 1 Hz detection misses entirely.
+  **OVERLAP IS A FREE INTEGRITY CHECK — and must FAIL CLOSED.** Transmitted samples appear in both
+  records and must agree exactly. On any mismatch, invalidate the JOIN (not just the sample), fall
+  back to session-only derivation, and record the mismatch count in the index. A partially-trusted
+  dump is the worst option: you cannot tell which half lied.
+  **PARTIAL DUMPS:** per-time-range authority, and **which chunks arrived must be recorded in the
+  dump artifact itself**, not reconstructed at rebuild time — otherwise "which source won where"
+  depends on when you rebuilt and determinism is gone.
+  **BYTE-IDENTICAL REBUILD SURVIVES — but only with a HASH.** The index must record the dump's
+  content hash AND coverage, not merely that one was used. Without it, a session-only rebuild and
+  a with-dump rebuild both claim to be *the* rebuild of that flight and nothing distinguishes
+  them. `index = f(session, ops, dump?)` is a function only if `dump?` is identified.
+  **PROTOCOL — the real trap, and it is worse than an ADR question.** ADR-0001's "unknown tags
+  ignored" clause is exactly what makes this unsafe: a dump frame with no `ALT`/`St` does not look
+  like a new frame type to the current decoder, it looks like a MALFORMED TELEMETRY PACKET.
+  **And if dump frames carry `SEQ` they inject into the sequence space and manufacture fake gaps
+  in `LinkStats`, corrupting the published loss percentage on every dump.** So: syntactically
+  additive, semantically a NEW FRAME TYPE. Needs an **ADR amendment** defining frame-type
+  classification BEFORE field interpretation, and dump frames must carry their own counter, never
+  `SEQ`. Likely not a `V` bump (no existing tag changes meaning) but definitely an ADR + decoder
+  change.
+  **LOSS FORK — looping (a) wins decisively.** 3x redundancy costs 45% duty, which is affordable,
+  while a reverse link (b) costs: a TX path on the Pi (the driver is RX-only today), a Part 97 ID
+  obligation once the ground station transmits, a half-duplex conflict during the most valuable
+  telemetry window, a sled RX window competing with sampling, and it forfeits the quietly valuable
+  property that the ground station currently CANNOT transmit. Improve (a) by interleaving chunks
+  with live telemetry and rotating chunk order between passes, so the three passes fail
+  independently against fading instead of all missing the same fade.
+- **BLOCKER ON THE EPIC 6 `CALL` BEACONING RIDER — a beacon silently inflates published packet
+  loss (DEMONSTRATED 2026-08-02, not theorised).** A beacon frame is `V:1 SYS:7 SRC:1 CALL:...`
+  with **no `ALT`/`St`**. Three things were checked and the first two are FINE:
+  1. The decoder does **not** error — `missing tags are valid` is documented policy
+     (`ground/decode/v1.py:10`) and `CALL` already rides the unknown-tag path
+     (`ground/ingest/core.py:61`). "Beaconing inflates decode errors" is NOT the failure.
+  2. `ObserverRegistry.dispatch` isolates consumers, so the radio loop does **not** crash.
+  3. **The real failure — partial mutation under a swallowed exception.**
+     `FlightSegmenter.observe()` mutates in this order: `t_end` -> `packets += 1` ->
+     `peak_alt = max(peak_alt, alt)` **<- raises `TypeError: '>' not supported between NoneType
+     and int`** -> `last_seq = seq` **never runs**. The registry swallows it with a bare `pass`
+     (no log, no counter), so `last_seq` stays stale and **the NEXT real packet counts a phantom
+     gap**. Verified by running it: identical received frames give `lost=0` with telemetry in
+     slot 4 and `lost=1` with a beacon there. **On a 75-packet flight that is ~1.3% phantom loss
+     — the same magnitude as F1's real published 1.32%.**
+  **Admission: passes (a)** — corrupts `loss_pct`, a published number, invisibly. **Passes (b)
+  with a demonstration**, which is stronger evidence than the `Max` item has.
+  **Fix is small and belongs BEFORE beaconing lands:** guard `observe()` against `alt is None`
+  (a frame with no altitude is not a flight observation — skip the vehicle fields but still
+  advance `last_seq`, since the frame WAS received and consumed a sequence number). Cheapest
+  correct shape: validate/normalise at the top of `observe()`, never mutate then raise.
+  See the C2 entry for the general frame-type analysis — **do not restate it here**.
+- **ADR amendment: classify FRAME TYPE before interpreting fields (arrives WITHOUT C2).** The
+  frame-type problem is on a path we are actually taking, not a hypothetical one: `CALL`
+  beaconing is an Epic 6 rider and produces exactly the no-`ALT`/no-`St` shape analysed under C2.
+  ADR-0001 v1's "unknown tags ignored / missing tags valid" clauses mean such frames are
+  *syntactically valid telemetry* to every consumer, which is how the loss-inflation bug above
+  arises. Amendment should define a frame-type tag and require classification BEFORE field
+  interpretation. Likely **not** a `V` bump (no existing tag changes meaning). Reasoning and the
+  dump-frame variant are in the C2 entry — cite, do not restate.
+- **`ObserverRegistry.dispatch` swallows consumer failures with NO counter and NO log.** The
+  isolation is correct and deliberate (D4: a consumer must never break the radio loop), but
+  `except Exception: pass` means a consumer can fail on **every packet** and nothing anywhere
+  says so — which is precisely how the beacon bug above stays invisible. Add an observer-error
+  counter (per-observer) surfaced in the health dict alongside `decode_errors`, so isolation
+  degrades loudly instead of silently. Small, and it makes a whole class of future consumer bugs
+  self-reporting.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

@@ -63,6 +63,21 @@ Epic 6 **before** Epic 7 (separation at main requires deployment to work). Item 
 redesign) is a **consciously-spent exception** to the admission rule, bounded by its closure bar
 (below); Epic 6 is what actually unblocks flying, so the redesign must not displace it.
 
+### OPEN VERIFICATION — hero glyphs have NOT been judged in daylight
+
+**Glyphs approved 2026-08-02 on the real panel** (rendered at true 28px via a raw-bitmap SSH
+probe; `0689` counters, `10.2k` decimal, `k`, `-84`, `1834`). **But the closure bar says "at
+arm's length IN DAYLIGHT", and the lighting of that judgement was not recorded — so the daylight
+half is OPEN, not closed.** Same rule as evidence-must-describe-the-artifact: an indoor pass does
+not license a daylight claim.
+**Confirm outdoors BEFORE the redesign merges.** The specific risk is `0689`: 4 px strokes around
+a 6 px counter. Sunlight lowers effective contrast, so counters that hold indoors can fill at
+distance outdoors. If they do, **stroke drops to 3 px and all 13 glyphs are redrawn** — which
+also invalidates every metric derived from them (`10.2k` = 70 px of 128, the hero band budget,
+and any goldens generated in the meantime). **Do not generate goldens until daylight passes.**
+Also unrecorded and worth capturing when confirmed: the distance at which `0689` counters stop
+being distinct, and which frame is hardest at ten feet — that sets the real legibility floor.
+
 ### Item 3 closure bar (ACCEPTED 2026-08-02) — the redesign is DONE when...
 
 At arm's length in daylight, the operator can answer **four questions** without touching the box:
@@ -914,6 +929,34 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   **Correct home:** a `consumer_errors` counter (per-observer) in the ingest heartbeat state file
   as DATA, plus the dashboard health dict alongside `decode_errors`, plus journald. Counted and
   visible, not an LED. Makes a whole class of future consumer bugs self-reporting.
+- **ARCHITECTURE CLASS — "sentinel colliding with a legal value". The v1 wire format has no way
+  to express ABSENT distinctly from ZERO, and every ground consumer that coalesces `None -> 0`
+  inherits it.** Three instances found so far are one defect shape, not three bugs: `Max:0` sent
+  pre-launch (0 is a valid altitude), `SEQ -> 0` on an absent tag (0 is a valid sequence number),
+  `ALT -> 0` on an absent tag (0 is a valid altitude).
+  **TARGETED SWEEP of `ground/` (2026-08-02) — the blast radius is SMALL and bounded:**
+  | site | path | coalesces | verdict |
+  |---|---|---|---|
+  | `flights/live.py:38-39` | live | `ALT->0`, `SEQ->0` | **LOAD-BEARING** |
+  | `flights/derive.py:62-63` | **offline rebuild** | `ALT->0`, `SEQ->0` | **LOAD-BEARING** |
+  | `oled/render.py:19` | display | `seq_loss_pct->0` | cosmetic (uses `--` for RSSI but `0` for loss) |
+  | `oled/spec.py:132` | sort key | `src->0` | safe — panels always carry `src` |
+  | `dashboard/model.py:118-119`, `publish/data.py:29`, `linkstats.py:39-44` | counters | `->0` | safe — counters legitimately start at 0 |
+  No `or 0` anywhere. **The DECODER is clean**: absent tags never enter `fields`, so
+  `fields.get("ALT")` correctly returns `None`. Every instance is DOWNSTREAM coalescing.
+  **The offline REBUILD has the same defect as the live path** — so a session log containing one
+  beacon reproduces `packets_lost = 65,536` on every `flights rebuild`, **byte-identically**.
+  Determinism does not protect against a wrong sentinel; it reproduces the wrong number
+  faithfully, and rebuild is what regenerates the PUBLISHED index. Any fix must land in BOTH
+  sites or live and rebuild will silently disagree.
+  **OPEN QUESTION FOR ADR-0001 — state it, decide it deliberately, do NOT answer it in passing.**
+  Should the wire format gain an explicit ABSENT representation, or is "the ground never
+  coalesces" a sufficient rule? Arguments both ways: a wire-level absent marker costs airtime on
+  every packet and touches the locked v1 contract (the e2e fixture gate protects it); a
+  ground-side rule costs nothing but must be re-enforced at every new consumer forever, and has
+  already been violated twice in two modules. **This arrives again with Epic 7**: the lander
+  carries BME/APDS fields and may legitimately omit `ALT`, so a node whose packets have no
+  altitude is a REAL case, not a hypothetical. Decide before Epic 7 wiring, not during.
 - **ADR amendment: classify FRAME TYPE before interpreting fields (arrives WITHOUT C2).** The
   frame-type problem is on a path we are actually taking, not a hypothetical one: `CALL`
   beaconing is an Epic 6 rider and produces exactly the no-`ALT`/no-`St` shape analysed under C2.

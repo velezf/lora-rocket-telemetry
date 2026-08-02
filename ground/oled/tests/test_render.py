@@ -97,7 +97,10 @@ class TestFrameSpec(unittest.TestCase):
     # --- live page ---
 
     def test_live_page_carries_state_and_hero(self):
-        spec = frame_spec({"panels": [_panel(state="ascent", altitude_ft=500)]},
+        # LIVE now means "a flight is OPEN" (redesign 2026-08-02), not merely "panels
+        # exist" — a sled transmitting on the pad with no flight open is the IDLE/pad page.
+        spec = frame_spec({"panels": [_panel(state="ascent", altitude_ft=500,
+                                             flight_open=True)]},
                           clock="rtc", tick=0)
         self.assertEqual(spec.page, "live")
         self.assertEqual(spec.state, "ASCENT")

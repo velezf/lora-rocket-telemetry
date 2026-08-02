@@ -7,6 +7,42 @@ so the OLED can never crash the radio owner.
 """
 OLED_ADDR = 0x3D
 
+# SSD1306 128x64 configuration, re-sent before EVERY frame.
+#
+# WHY UNCONDITIONALLY, and why not an error check: luma sends its init sequence once, at
+# construction. A display that loses power mid-session (a connector reseating in transit)
+# comes back RESET — display off, charge pump off, addressing/multiplex defaulted — but it
+# still ACKs on I2C, so luma keeps writing pixels into a dark panel and NOTHING raises.
+# There is no error to detect, which is why the recovery has to be unconditional rather
+# than triggered. Verified live 2026-08-02: a reseat recovered cleanly with the render-error
+# count at ZERO — nothing to have triggered on, exactly as predicted.
+#
+# NOTE THE ABSENT 0xAE (display off). A cold init starts with it for hygiene — blank the
+# panel so an unconfigured display does not show garbage while you set it up. Re-sending it
+# every frame turned the panel OFF for the duration of the command burst (~1.5 ms at 400 kHz,
+# ~6 ms at 100 kHz) and back on, which at 1 Hz reads as a VISIBLE FLICKER at the pad.
+# It was never part of recovery — a reset display is already off — so dropping it removes the
+# flash without weakening anything: every config byte is still re-sent unconditionally, and
+# the trailing 0xAF is a no-op when already on and the recovery command when not.
+# The remaining commands are idempotent when re-sent with identical values.
+_INIT_SEQ = (
+    0xD5, 0x80,         # clock divide / oscillator frequency
+    0xA8, 0x3F,         # multiplex ratio = 64 rows
+    0xD3, 0x00,         # display offset 0
+    0x40,               # start line 0
+    0x8D, 0x14,         # charge pump ON  <- the one a reset display loses; without it, dark
+    0x20, 0x00,         # horizontal addressing mode
+    0xA1, 0xC8,         # segment remap + COM scan direction (orientation)
+    0xDA, 0x12,         # COM pins configuration
+    0x81, 0xCF,         # contrast
+    0xD9, 0xF1,         # pre-charge period
+    0xDB, 0x40,         # VCOMH deselect level
+    0xA4,               # resume from RAM (not all-pixels-on)
+    0xA6,               # normal (not inverted)
+    0x2E,               # deactivate scroll
+    0xAF,               # display ON
+)
+
 
 class OledDisplay:
     def __init__(self, addr: int = OLED_ADDR, i2c_port: int = 1):
@@ -14,7 +50,30 @@ class OledDisplay:
         from luma.oled.device import ssd1306          # pyright: ignore[reportMissingImports]  # Pi-only
         self._device = ssd1306(i2c(port=i2c_port, address=addr), width=128, height=64)
 
+    def reinit(self):
+        """Re-send the power-on sequence. Safe to call every frame; swallows I/O errors."""
+        try:
+            self._device.command(*_INIT_SEQ)
+        except Exception:
+            pass    # a wedged bus must never propagate — see show_image()
+
+    def show_image(self, image, reinit: bool = True):
+        """Draw a PIL image (mode "1", 128x64). Re-inits first by default.
+
+        Swallows everything: this runs on the RENDER thread, and the whole point of moving
+        it off the RX thread is that no display fault can reach telemetry capture. A hung
+        I2C write blocks only this thread; the radio loop keeps turning and the heartbeat
+        keeps ticking.
+        """
+        try:
+            if reinit:
+                self.reinit()
+            self._device.display(image)
+        except Exception:
+            pass    # OLED I/O failures degrade silently — never crash the radio owner
+
     def show(self, lines):
+        """Legacy text path. Retained for the bring-up tools; the service renders images."""
         try:
             from luma.core.render import canvas       # pyright: ignore[reportMissingImports]  # Pi-only
             with canvas(self._device) as draw:

@@ -54,6 +54,33 @@ For **prose procedures** (as opposed to literal values), the tool is the same co
 test: one canonical copy, everything else links to it. No test can judge whether two prose
 procedures mean the same thing.
 
+## Two surfaces, not peers: LEDs vs OLED
+
+**The LED panel answers "IS THE SYSTEM WORKING". The OLED answers "WHAT IS THE FLIGHT DOING".**
+
+The distinction is structural, not stylistic. The panel supervisor (`apogee-panel`) is its own
+process and **survives the failures it reports** — when ingest dies, the supervisor sees a stale
+heartbeat and drives RED fail-closed. The OLED's render thread lives **inside** `apogee-ingest`,
+so when that process dies the display **freezes showing plausible content and cannot report its
+own death**.
+
+Consequences that follow, and should decide the next such question without re-deriving it:
+- **The OLED must never be the authoritative reporter of a system-health fact.** Clock provenance
+  appears on the IDLE page (a pre-launch check, made standing at the box where `B_CLOCK` can be
+  cross-checked) and is **absent from LIVE and SUMMARY**, where a frozen `CLK rtc` would be a
+  trust claim from the least trustworthy channel.
+- **Deliberate redundancy is fine when the LED corrects the OLED.** Flight state lives on both at
+  different ranges; on an ingest death the supervisor clears `G_FLIGHT` while the OLED still shows
+  `ASCENT`. That is not tolerated duplication — it is the safety property.
+- **The liveness glyph stays on the OLED**, because it reports the RENDER THREAD's aliveness — a
+  different failure domain from `G_ALIVE` (the RX loop). No LED can report it.
+
+### OPERATOR PROCEDURE — when the two surfaces disagree, believe the LEDs
+
+**Dark `G_RX` with a plausible-looking hero on the OLED means ingest is dead and the display is
+showing you the past.** The panel is fail-closed and outlives the process it reports on; the
+display does not. Any disagreement resolves in the LEDs' favour, every time.
+
 ## Published output resolves from the record, never from the environment
 
 **Anything that appears in published output — a page, an export, a permalink, a rendered

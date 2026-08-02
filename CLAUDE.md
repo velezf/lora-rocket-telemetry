@@ -54,6 +54,23 @@ For **prose procedures** (as opposed to literal values), the tool is the same co
 test: one canonical copy, everything else links to it. No test can judge whether two prose
 procedures mean the same thing.
 
+## Published output resolves from the record, never from the environment
+
+**Anything that appears in published output — a page, an export, a permalink, a rendered
+figure — resolves from the RECORD, never from the config or environment of the machine doing
+the publishing.** Republishing the same record from another machine must produce byte-identical
+output; if a value can differ because of *where* you ran the publisher, it is not publishable
+input.
+
+This is the same principle as the ops journal: annotations are data, not the state of somebody's
+laptop. Concretely — the operator callsign on the flights page comes from `CALL` captured in the
+session log, **not** from `callsign_binding` in `~/.config/apogee/ingest.json`, which is per-box
+field config and uncommitted by design.
+
+It is also why the 2026-08-01 provenance gap mattered: the published `flights.json` carried
+annotations that no journal could reproduce, so the artifact could not be re-derived. Live config
+is a subtler version of the same failure — it reproduces fine on *your* machine and nowhere else.
+
 ## Firmware (PlatformIO)
 
 - **`pio` binary:** `~/.platformio/penv/bin/pio`. Interactive zsh has it on `PATH`;

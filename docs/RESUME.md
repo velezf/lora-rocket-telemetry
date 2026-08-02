@@ -19,8 +19,11 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 
 ## NEXT SESSION — start here
 
-**Next branch: `feat/oled-heartbeat` — THREE admitted items, ONE branch.** Do not start it in a
-session that can't finish RED.
+**`feat/oled-heartbeat` — DONE and MERGED 2026-08-02** (`52e5fe0`). All three items **verified
+LIVE on `apogee-gs`, not asserted**: the idle frame renders on a quiet pad with the liveness
+glyph cycling and `CLK rtc`; a **STEMMA QT reseat recovered clean** with the render-error count
+at **zero**; and the radio loop is provably unharmed (heartbeat still ticking ~1 Hz from inside
+the RX loop, dashboard still 200). Kept below for the record:
 1. **Periodic redraw** so the display doesn't go dark when the sled is quiet (the defect hit on
    the bench 2026-07-30 — `_oled_update` renders only on an observation callback, so a quiet pad
    sits at luma's cleared-black init state and looks dead).
@@ -37,8 +40,46 @@ session that can't finish RED.
 hand-drawn digits, committed bitmap font, golden-image tests, the three-page system, page
 transitions/persistence, RSSI sparkline, burn-in mitigation, stale-hero treatment.
 
-**After the OLED fix: Epic 6 (relay deployment)** — safety-critical, gets the slot while
-attention is fresh. Epic 6 **before** Epic 7 (separation at main requires deployment to work).
+### What the OLED fix taught (2026-08-02)
+
+- **The re-init had to be UNCONDITIONAL because the fault is SILENT.** A power-cycled SSD1306
+  comes back reset (charge pump off, display off) but **still ACKs**, so luma writes pixels into
+  the dark and nothing raises. Proven: the reseat recovered with **0 render errors and no I2C
+  error of any kind** — there was never anything for a triggered recovery to trigger on.
+- **`0xAE` was flashing the panel once a second** and was removed. It is cold-start hygiene
+  (blank an unconfigured panel while setting it up), **never part of recovery** — a reset display
+  is already off. `0xAF` and the charge pump still ship unconditionally every frame, so the
+  property survived the fix. Cadence stayed at 1 Hz: a slower tick reduces flash *frequency*
+  without removing it, and a rare irregular flash is worse than a rhythmic one.
+- **Evidence must describe the RUNNING artifact.** The first reseat passed against a sequence
+  that still contained `0xAE`; once that byte was removed, the deployed binary was different and
+  the old evidence no longer covered it, so the reseat was **re-run**. Same rule that caught
+  preview-output-as-CI-evidence on 2026-08-01. Frank caught this one.
+- **The two-layer split is falsifiable, not aspirational:** if the redesign forces a change to
+  `spec.py`'s public surface, the seam was in the wrong place — surface that, don't work around it.
+
+**NEXT: Epic 6 (relay deployment)** — safety-critical, gets the slot while attention is fresh.
+Epic 6 **before** Epic 7 (separation at main requires deployment to work). Item 3 (the OLED
+redesign) is a **consciously-spent exception** to the admission rule, bounded by its closure bar
+(below); Epic 6 is what actually unblocks flying, so the redesign must not displace it.
+
+### Item 3 closure bar (ACCEPTED 2026-08-02) — the redesign is DONE when...
+
+At arm's length in daylight, the operator can answer **four questions** without touching the box:
+1. **Is it capturing?** — state legible at a glance; idle vs live unambiguous.
+2. **How high?** — hero readable from ~1 m, with **defined behaviour above 9,999 ft**.
+3. **Is this number current?** — a frozen hero is visually distinct from a live one.
+4. **Is the link healthy?** — RSSI and loss readable without decoding text.
+
+Plus two build constraints: goldens are **deterministic across Mac and Pi** (hand-drawn digits +
+committed TTF, no system font); and **the drawing-layer swap does not change `spec.py`'s public
+surface** — a falsifiable test of whether the two-layer split actually worked.
+
+**Anything not serving those four questions goes to backlog.** By that bar: burn-in mitigation is
+IN (it protects question 2 over time), page transitions are OUT, and the trend strip is IN only
+if it answers something the hero does not. **No fifth question** — "will the battery last" was
+considered and rejected: RED fast-blink on the LED panel already answers it, and duplicating a
+signal is not adding one. **Being able to drop things is the test of whether the bar is real.**
 
 ### Architecture question to ANSWER next session (not now): Quarto render source of truth
 
@@ -652,6 +693,51 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
      removed from the LEDs (a lit flight LED after an ingest crash). Needs a freshness treatment
      driven off `last_rx_ts` age with a **state-dependent** threshold: silence on the PAD is
      normal, silence during ASCENT/DESCENT is not.
+- **SRC alias — display SRC numbers as callsign-style names (FLAVOR today; decided 2026-08-02,
+  not built).** Show `KC3ZTQ-1` rather than `SRC:1 KC3ZTQ` — shorter, and real ham notation
+  instead of decoration. Optionally pair with tactical names (`SLED`, `LANDER`) for
+  glance-reading, SSID where identity matters (logs, the published page).
+
+  **HARD CONSTRAINT — presentation only.** The wire format stays `SRC:1`: ADR 0001 v1 is locked,
+  the e2e fixture gate protects it, and spending airtime on a name the ground station already
+  knows is backwards. **Stored records keep raw `SRC`**, the same discipline as raw `ALT` never
+  being transformed. The alias resolves at DISPLAY time.
+
+  **Where the map lives — two halves, different owners; conflating them is the trap.** The ROLE
+  (`1=sled, 2=lander, 9=handheld`) is **contract** and already lives in ADR 0001 Appendix A. The
+  CALLSIGN is **operator config** (`callsign_binding`, uncommitted by design). So: one pure
+  `node_name(src, callsign=None, style="ssid")` in a single module citing the ADR, with the
+  callsign **passed in** by the caller — one implementation, three consumers (`frame_spec`, the
+  dashboard, flights publish), no second config reader.
+
+  **For the PUBLISHED page the callsign comes from the RECORD** (`CALL` in the session log,
+  already carried in `flights.json`), never from live config — see **"Published output resolves
+  from the record, never from the environment"** in `CLAUDE.md`. Do not restate that rule here.
+
+  **Unknown SRC renders as the RAW NUMBER** (`SRC:7`), never a plausible name. This is not
+  cosmetic: an unknown SRC is a *tracked anomaly* (`known_src`, the anomaly counter, the
+  foreign-traffic/Part-97 policy all exist to surface nodes that should not be there). Dressing
+  one as a name would **suppress a safety signal the system deliberately raises**. Unmapped must
+  look unmapped.
+
+  **SSID style: SRC-matching symmetry — `1→-1, 2→-2, 9→-9`. NOT the idiomatic `-11`.**
+  Recorded so a future ham does not "fix" it: APRS convention does assign **-11 to
+  balloons/aircraft/spacecraft**, so a rocket would idiomatically be `KC3ZTQ-11`. But we are
+  **not transmitting APRS** — the callsign is Part-97 station ID and this is borrowed notation
+  for readability only. Nobody decodes it as APRS, so being **self-documenting against the wire
+  format** (the SSID digit *is* the `SRC` digit) is worth more than an idiom no one will check.
+
+  **Scheduling: build in item 3 (the redesign) ONLY if it costs nothing to carry, and DROP it the
+  moment it competes with the closure bar's four questions.** It does not serve any of them —
+  identity is not *capturing / how high / is this current / link healthy* — so it rides as a
+  second consciously-spent exception inside an epic that is already one. **Being able to drop it
+  is the test of whether the bar is real.**
+
+  **Admission scoring: fails clause (b), not clause (a).** At a multi-node launch, telling sled
+  from lander at a glance IS operational — `SRC:1` vs `SRC:2` is a decoding step under time
+  pressure. It fails today only because **there is no second node yet**, so there is no evidence.
+  It becomes genuinely admissible when **Epic 7** makes one exist. Cost if built: ~30 lines pure
+  + 5-6 tests + three one-line call sites.
 - **OLED multi-SRC page cycling.** The LIVE page currently shows ONE panel, chosen by a rule
   that is **forced, not chosen**: with rendering moved off the RX thread there is no observed
   packet whose SRC keys the display, so `_pick()` prefers a panel with `flight_open`, else the

@@ -42,7 +42,12 @@ def derive_flights(session_records, ops=None, silence_timeout_s: float = 90):
     # merged, time-sorted event stream; at equal t: open(0) < packet(1) < close(2)
     events = []
     for r in session_records:
-        if r.get("type") == "packet" and "fields" in r and r["fields"].get("St") is not None:
+        # EVERY accepted packet reaches the segmenter, including non-telemetry
+        # frames (bare `CALL` beacons, which carry no `St`). This filter used to
+        # drop them here, which meant the rebuild counted differently from the
+        # live path — the beacon segregation now lives in ONE place,
+        # segmenter.is_telemetry, so the two cannot disagree.
+        if r.get("type") == "packet" and "fields" in r:
             events.append((_epoch(r["received_at"]), 1, "packet", r))
     for o in ops:
         if o.get("op") == "open":
@@ -58,9 +63,11 @@ def derive_flights(session_records, ops=None, silence_timeout_s: float = 90):
         flights.extend(seg.check_timeouts(t, protect))
         if kind == "packet":
             f = obj["fields"]
+            # Absent tags stay absent — same contract as the live path
+            # (ground/flights/live.py), so rebuild and live derive the same stats.
             seg.observe(obj["received_at"], t, obj.get("src"), f.get("St"),
-                        f.get("ALT") if f.get("ALT") is not None else 0,
-                        obj.get("rssi"), f.get("SEQ") if f.get("SEQ") is not None else 0)
+                        f.get("ALT"), obj.get("rssi"), f.get("SEQ"),
+                        max_alt=f.get("Max"))
         elif kind == "open":
             seg.force_open(obj["at"], t, obj["src"])
         elif kind == "close":

@@ -119,6 +119,47 @@ they must not paraphrase it** — same discipline as ADR 0003 and the deploy pat
     exchange matter — an ambiguous prompt and a self-serving reading — and neither is fixed by
     trying harder.)*
 
+### FAILURE CLASS: a check that looked like it was checking
+
+**Three instances in one day, all the same shape: a guard that reported success without
+having verified anything.** Named as a class because it generalises to guards not yet
+written — the question to ask of any check is not "did it pass?" but **"could this have
+failed?"**
+
+| Hollow form | Why it never fails | Reliable form |
+|---|---|---|
+| `pytest … \| tail -1 && git push` | the pipeline's exit status is `tail`'s, which is **always 0** — so "verified, then pushed" was not a gate at all | `pytest … \|\| exit 1` (or `set -o pipefail`) |
+| `pgrep -f "some pattern"` | the checking command's own `bash -c` line **contains the pattern**, so it matches itself | `ps -eo args \| grep <pattern> \| grep -v grep` |
+| a repo command relying on inherited `cwd` | the Bash tool persists cwd between calls; **git answers honestly about the wrong tree** | `cd <ABSOLUTE_REPO_ROOT> && …` (enforced by `.claude/hooks/verify-cwd.sh`) |
+
+**Consequence that must stay visible:** an earlier "PROBE CONFIRMED RUNNING (pgrep-verified)"
+may itself have been a self-match. **So the daylight glyph verification rests on a check that
+may have been hollow** — which is a second, independent reason that item stays OPEN, on top of
+the distances never being recorded. An open item should say WHY it is open.
+
+**Instance 1 is rule 12 in mechanical form, and the shell-level reading misses the point.**
+"Don't chain a verification into a push" is easy to obey while still missing why:
+**the gate was never "tests passed" — it is "a human read the result and said the word."**
+`|| exit 1` would have made the check honest while still removing the human from the loop.
+A push conditioned on an exit code is a push nobody read.
+
+**DESIGN CONSTRAINT ON HOOKS: scope narrowly enough that it survives.** Blocking every
+`pytest … |` would fire on nearly every run, and a guard that gets turned off protects
+nothing. The cwd hook is deliberately limited to commands that touch repo state for the same
+reason. Breadth that guarantees the guard is disabled is worse than a narrower guard that
+stays on.
+
+**STATUS: the hook is COMMITTED BUT NOT WIRED.** `.claude/hooks/verify-cwd.sh` is inert until
+registered as a `PreToolUse` hook in settings. Recorded here rather than left implicit,
+because a guard that exists but does not run is exactly the designed-but-inert hazard this
+project already tracks for panel signals.
+
+**Relationship to the other recorded patterns.** *Self-correction has its own failure mode*
+says looking harder carries its own bias. *A defect that does not reproduce casually* says
+NOT finding something is weak evidence. This one says **finding something is weak evidence
+too, if the instrument cannot fail.** All three are about the trustworthiness of evidence
+rather than the correctness of code.
+
 ### Related rules that already existed and still apply
 
 - **Admission rule** — admit only if it (a) prevents lost flight data, a corrupted record, or an

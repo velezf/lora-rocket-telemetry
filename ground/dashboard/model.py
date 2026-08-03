@@ -10,13 +10,20 @@ AGL zero (v2): a bounded trailing window of recent ALT feeds the pure `pad_basel
 (ground.flights.baseline). Before a flight the pad zero tracks the live quiet window
 (so the pad reads ~0); at flight_open the baseline is LOCKED from the pre-boost window
 and held through the flight; flight_close (reset_baseline) unlocks and clears it. Raw
-ALT is never transformed. `view_model` assembles a snapshot + LinkStats + open-flight
+ALT is never transformed. A frame carrying NO `St` (a Part-97 CALL beacon) is treated
+as no information about flight state — it changes neither the lock nor the published
+zero; absence is not "not in flight".
+
+The published peak comes from the sled's `Max`, gated by `max_is_meaningful` imported
+from ground.flights.segmenter — the single definition of when `Max` may be trusted
+(never restated here). `view_model` assembles a snapshot + LinkStats + open-flight
 ids + health. No Flask, no HTTP, no clock — host-tested.
 """
 import json
 from collections import deque
 
 from ground.flights.baseline import pad_baseline, WINDOW, EXCLUDE_TAIL
+from ground.flights.segmenter import max_is_meaningful
 
 _STATE_NAMES = {0: "pad", 1: "ascent", 2: "descent"}
 _HIST_LEN = WINDOW + EXCLUDE_TAIL     # enough trailing ALT for one baseline compute
@@ -70,13 +77,26 @@ class LiveState:
         if in_flight and locked is None:
             locked, _ = pad_baseline(list(hist))
         new_hist = (hist + (alt,))[-_HIST_LEN:]
-        if in_flight:
+        if st is None:
+            # NO `St` = NO INFORMATION about flight state — never "not in flight".
+            # A Part-97 CALL beacon (required every 10 min) carries no St; reading
+            # its absence as pad UNLOCKED the baseline mid-flight and every later
+            # altitude was then wrong by the whole baseline, permanently, with only
+            # a blanked baseline_ft as the tell. So an St-less frame changes neither
+            # the lock nor the published zero.
+            baseline = prev.get("baseline")
+        elif in_flight:
             baseline = locked                              # held through the flight
         else:
-            locked = None                                  # not in flight -> unlocked
+            locked = None                                  # on the pad -> unlocked
             baseline, _ = pad_baseline(list(new_hist))     # live pad zero (pad reads ~0)
+        # `Max` is the sled's own running peak and is only trustworthy once St says it
+        # has left the pad (the firmware sends Max:0 pre-launch and 0 ft is a legal
+        # altitude, not a sentinel). The gate is IMPORTED from the segmenter — the
+        # single definition — so this surface cannot drift from the flights index.
+        peak = f.get("Max") if max_is_meaningful(st) else None
         per_src = {
-            "src": src, "alt": alt, "peak": f.get("Max"), "st": st,
+            "src": src, "alt": alt, "peak": peak, "st": st,
             "rssi": obs.rssi, "seq": f.get("SEQ"), "met": f.get("MET"),
             "received_at": obs.received_at, "callsign": call, "trace": trace,
             "alt_hist": new_hist, "locked_baseline": locked, "baseline": baseline,

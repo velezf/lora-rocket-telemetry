@@ -51,7 +51,10 @@ def cmd_list(a):
         s = f.stats
         print(f"{f.flight_id}  SRC:{f.src}  {f.t_start} .. {f.t_end}  "
               f"peak={s.get('peak_alt_ft')}ft dur={s.get('duration_s')}s "
-              f"rx={s.get('packets_rx')} lost={s.get('packets_lost')}  {f.label}".rstrip())
+              # `rx` is TELEMETRY only and `beacons` is shown beside it, never
+              # folded in — see ground/flights/segmenter.py is_telemetry.
+              f"rx={s.get('packets_rx')} lost={s.get('packets_lost')} "
+              f"beacons={s.get('beacons_rx', 0)}  {f.label}".rstrip())
 
 
 def cmd_annotate(a):

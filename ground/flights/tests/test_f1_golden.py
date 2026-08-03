@@ -52,11 +52,32 @@ class TestF1Golden(unittest.TestCase):
         self.assertEqual(f.stats, {
             "peak_alt_ft": -74, "duration_s": 87.556,
             "packets_rx": 75, "packets_lost": 1,          # one real SEQ gap during the swing
+            # INTERFACE CHANGE, 2026-08-02: `beacons_rx` was ADDED to the stats
+            # dict when non-telemetry frames were segregated out of flight
+            # accounting (see ground/flights/segmenter.py is_telemetry). F1 flew
+            # before the sled emitted `CALL`, so it contains no beacons and every
+            # OTHER number below is byte-identical to the pre-change golden — the
+            # new key is the whole of the diff. The published flights.json is
+            # unaffected: ground/publish/data.py builds its own explicit summary
+            # dict and was deliberately not touched.
+            "beacons_rx": 0,
             "rssi_min": -38, "rssi_max": -14,
             # v2 AGL zero, recomputed retrospectively from the 19 quiet pre-boost pad
             # packets (SEQ 0-18, ALT -83..-85): peak AGL = -74 - (-84) = 10 ft (noise).
             "baseline_ft": -84, "baseline_n": 15,
         })
+
+    def test_pad_max_sentinel_is_real_in_this_fixture(self):
+        """The sled's `Max` is the peak authority, but on the pad it reads 0 —
+        and F1 flew ENTIRELY below 0 ft raw (pad baseline -84 ft). So an ungated
+        max(Max) over this real slice yields 0, i.e. a published +84 ft AGL for a
+        flight that reached 10 ft. Gated on St != 0 it yields the true -74."""
+        maxes = [r["fields"]["Max"] for r in self.packets]
+        self.assertEqual(max(maxes), 0)                                  # the trap
+        self.assertEqual(max(m for m, r in zip(maxes, self.packets)
+                             if r["fields"]["St"] != 0), -74)            # gated
+        flights = derive_flights(self.records, ops=self.ops, silence_timeout_s=90)
+        self.assertEqual(flights[0].stats["peak_alt_ft"], -74)
 
     def test_derivation_is_deterministic(self):
         """Re-derivation yields an identical index (the round-trip proved live)."""

@@ -74,6 +74,11 @@ they must not paraphrase it** — same discipline as ADR 0003 and the deploy pat
    - **It is destroyed by a stray checkout**, which nearly happened on 2026-08-02.
    - **A commit has a hash**, so claims about it can be verified — which is what this project's
      whole verification discipline turns on.
+   **COROLLARY — merging an agent's branch ALWAYS requires a main-thread commit first.** The
+   agent commits to its own branch; the main thread reviews that commit, then merges. There is no
+   path where agent work reaches `main` without a human-gated merge, and no path where it reaches
+   `main` uncommitted. *(Discovered the hard way: `git merge` on a zero-commit branch is a SILENT
+   no-op — it reports success and changes nothing.)*
    *(Second rule to need correcting. The first was rule 10.)*
 4. **No exploring new ideas inline.** Anything noticed goes to the stream's scratch file with the
    concrete trigger that would revive it.

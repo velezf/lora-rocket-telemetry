@@ -33,10 +33,11 @@ class LiveFlights:
         """Registry consumer: obs = Observation(received_at, rssi, packet, mono).
         Records use the wall `received_at`; silence/duration use `mono`."""
         f = obs.packet.fields
+        # Absent tags pass through as None — the segmenter skips what it can't
+        # compute. Coalescing to 0 here fabricated peaks and packet loss.
         opened = self._seg.observe(
             obs.received_at, obs.mono, f.get("SRC"), f.get("St"),
-            f.get("ALT") if f.get("ALT") is not None else 0,
-            obs.rssi, f.get("SEQ") if f.get("SEQ") is not None else 0)
+            f.get("ALT"), obs.rssi, f.get("SEQ"), max_alt=f.get("Max"))
         if opened:
             self._sink(to_jsonl(event_record(obs.received_at, "flight_open",
                                              flight_id=opened, src=f.get("SRC"))))

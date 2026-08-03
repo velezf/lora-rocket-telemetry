@@ -54,6 +54,55 @@ For **prose procedures** (as opposed to literal values), the tool is the same co
 test: one canonical copy, everything else links to it. No test can judge whether two prose
 procedures mean the same thing.
 
+## Parallel agents — the canonical rules (cite this, don't restate it)
+
+Adopted 2026-08-02, first day of parallel work. **Agent prompts CITE this section by name;
+they must not paraphrase it** — same discipline as ADR 0003 and the deploy path.
+
+### Rules that constrain AGENTS
+
+1. **The Pi is exclusive, by construction.** Only the main thread touches hardware. Agents get
+   tasks that need none, so exclusivity never depends on an announce/release protocol holding
+   under pressure. *(A probe stopping `apogee-ingest` is why this can't be implicit.)*
+2. **Own branch/worktree; no two streams touch the same file.** Held on day one.
+3. **No agent commits, merges, pushes or tags.** They stop at the gate and report. Merges stay
+   serial through Frank.
+4. **No exploring new ideas inline.** Anything noticed goes to the stream's scratch file with the
+   concrete trigger that would revive it.
+5. **Each stream reports independently**, so reviews happen separately rather than as one blob.
+6. **No agent writes `docs/RESUME.md`.** Per-stream scratch files, folded in serially by the main
+   thread. *(RESUME is the most contended file in the repo; every stream wants to append backlog.)*
+7. **A stream that doesn't reach a gate in-session is explicitly parked or closed**, named in
+   RESUME with its state. *(Parallel branches are how 34 stale branches accumulated.)*
+8. **An agent's report is only valid relative to its BASE COMMIT, and it must say so up front.**
+   Agents branch from `main`, not the working branch, so anything committed only on a feature
+   branch is invisible to them. *(An agent reported "X appears nowhere in RESUME" — true in its
+   worktree, false in the repo. Scope must arrive attached to the claim.)*
+
+### Rules that constrain the MAIN thread
+
+9. **`.claude/worktrees/` is gitignored — scoped to `worktrees/` only**, never all of `.claude/`,
+   which may later hold tracked agent definitions or settings.
+10. **NEVER rely on inherited working directory. `cd` to the absolute repo root before any repo
+    command.** The Bash tool persists cwd between calls, so a single earlier `cd` into a worktree
+    silently relocates every subsequent "my repo" command — and **git will answer honestly about a
+    tree you didn't mean to be in.** *(This produced six tool calls of wrong conclusions and an
+    alarming, entirely false report of an agent isolation failure. Isolation had held.)*
+    Convention first; a `PreToolUse` hook only **if it recurs** — a hook firing on every command
+    has its own noise cost, and one occurrence isn't a pattern.
+11. **Verify agent claims before relaying them.** Subagent reports are evidence, not findings.
+    Three of today's were verified: two confirmed and materially corrected the main thread's
+    picture; one was a base-commit artifact. Relaying unverified would have propagated all three.
+
+### Related rules that already existed and still apply
+
+- **Admission rule** — admit only if it (a) prevents lost flight data, a corrupted record, or an
+  ambiguous go/no-go at the pad, AND (b) has concrete evidence the failure is real.
+- **Budget rule** — at most one correctness and one hardening branch **awaiting a gate** at a time.
+  Slots are measured at the REVIEW QUEUE, not the worktree; parallelism does not add reviewer
+  attention. Investigation streams that produce proposals rather than diffs don't consume a slot.
+- **Gates** — Frank approves every commit, merge and push. Parallelism does not change this.
+
 ## Two surfaces, not peers: LEDs vs OLED
 
 **The LED panel answers "IS THE SYSTEM WORKING". The OLED answers "WHAT IS THE FLIGHT DOING".**

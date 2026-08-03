@@ -647,6 +647,17 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   Fix: have `restore_clock`/
   `attest_clock` write the reason INTO the marker (they touch it empty today) so `B_CLOCK` (pos 2) can blink
   on attest. Small follow-up to the clock module.
+- **`feat/drift-guards` — EVIDENCE UPDATE 2026-08-02: a drift-shaped failure fired, but NOT the
+  predicted one.** Within an hour of starting parallel agents something drift-shaped did occur —
+  and it was **NOT agent contamination**. An earlier claim in this session that it was is wrong,
+  and was amplified before being checked. **Actual mechanism: an unverified assumption about the
+  assistant's OWN working state.** The Bash tool persists working directory between calls; one
+  earlier `cd` into an agent worktree silently relocated six subsequent "my repo" commands. `git`
+  answered honestly — about a tree nobody meant to be in — producing an alarming and entirely
+  false report of an isolation failure. **Worktree isolation held; rule 2 was never violated.**
+  **What this is evidence FOR:** mechanical verification of assumed state, not a doc-drift
+  detector. The cheap fix is rule 10 in `CLAUDE.md` (absolute-path discipline); try that before
+  building any guard.
 - **`feat/drift-guards` — NOT NOW, deliberately deferred (2026-07-31).** Would pair a
   non-duplication test with the unit-install guard below. **Deferred because the sanctioned
   deploy path removes most of the mechanism it would detect:** hand-copying happened because
@@ -929,6 +940,29 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   **Correct home:** a `consumer_errors` counter (per-observer) in the ingest heartbeat state file
   as DATA, plus the dashboard health dict alongside `decode_errors`, plus journald. Counted and
   visible, not an LED. Makes a whole class of future consumer bugs self-reporting.
+- **FRAME CLASSIFICATION IS ALREADY HAPPENING, SIX TIMES, UNOWNED (census 2026-08-02).** REPLACES
+  the earlier three-site framing. Every site independently re-guesses "is this frame telemetry?"
+  from whichever field it happens to need:
+  | # | Site | Predicate | Silently does to a failing frame |
+  |---|---|---|---|
+  | A | `flights/live.py:32-39` | **none** | everything reaches the segmenter; `ALT`/`SEQ` coerced to 0 |
+  | B | `flights/derive.py:45` | `St is not None` | **dropped — no counter, no event, no log** |
+  | C | `ingest/core.py:78` | `"SEQ" in f` | skipped for loss accounting (right outcome, unnamed) |
+  | D | `ingest/core.py:61,83` | `unknown.get("CALL")` | inverse classifier; also fires on telemetry frames |
+  | E | `dashboard/model.py:57-59` | `SRC is None -> return` | a beacon HAS `SRC`, so it passes and clobbers the panel |
+  | F | `flights/export.py:20` | `type=="packet"` + src match | **emits an all-null row into the PUBLISHED per-flight CSV** |
+  **Row F is the strongest beaconing evidence we have** — VERIFIED by running it: a beacon inside a
+  flight's window becomes a CSV row with all eleven telemetry columns null, in the file the public
+  flights page plots. Only census row reaching a public artifact.
+  **Rows A and B are the same decision made twice, and they DISAGREE** on identical input —
+  undetected for the whole of Epic 4. So `draft-0004` is **replacement, not addition**.
+  **Instructive contrast:** `core.py:63,70` gate on SYS/SRC policy and get it RIGHT — a failing
+  frame is counted (`foreign`, `anomalies`) AND written as an advisory event. Network-policy
+  failures are surfaced; frame-shape failures are not. Hence: **a frame that fails classification
+  must be counted and surfaced, never silently dropped**, or the amendment relocates row B's silence.
+  **Forward mis-fire:** an Epic 7 lander frame (`SRC:2`, no `St`) is silently dropped from flight
+  derivation — no anomaly, no event, no error. Same class as `ObserverRegistry.dispatch`'s bare
+  `except Exception: pass`: correct-in-intent isolation that discards the evidence it fired.
 - **ARCHITECTURE CLASS — "sentinel colliding with a legal value". The v1 wire format has no way
   to express ABSENT distinctly from ZERO, and every ground consumer that coalesces `None -> 0`
   inherits it.** Three instances found so far are one defect shape, not three bugs: `Max:0` sent
@@ -944,7 +978,17 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   | `dashboard/model.py:118-119`, `publish/data.py:29`, `linkstats.py:39-44` | counters | `->0` | safe — counters legitimately start at 0 |
   No `or 0` anywhere. **The DECODER is clean**: absent tags never enter `fields`, so
   `fields.get("ALT")` correctly returns `None`. Every instance is DOWNSTREAM coalescing.
-  **The offline REBUILD has the same defect as the live path** — so a session log containing one
+  **CORRECTION (2026-08-02, after `fcdc86a` claimed otherwise): the offline REBUILD was NEVER
+  exposed to a bare beacon.** `derive.py:45` admits only records where `fields.get("St") is not
+  None`, and a bare `CALL` beacon carries no `St`, so it is dropped before segmentation. The
+  corruption is **LIVE-PATH ONLY**. `fcdc86a` asserted a second broken site *without running it* —
+  the same failure as the earlier `observe()`-direct demonstration, one level up. **An agent
+  checking the claim caught it**, and it would otherwise have been carried forward as fact.
+  The honest framing is sharper than the wrong one: the LIVE record contradicts what a REBUILD
+  produces from the same session, so `flight_close` and `flights-snapshot.json` disagree with the
+  canonical index. Both coalescing sites are still worth fixing — a genuine telemetry frame that
+  carries `St` but omits `ALT` is legal under ADR 0001 and hits `derive.py:62-63` for real.
+  ~~The offline REBUILD has the same defect as the live path~~ — so a session log containing one
   beacon reproduces `packets_lost = 65,536` on every `flights rebuild`, **byte-identically**.
   Determinism does not protect against a wrong sentinel; it reproduces the wrong number
   faithfully, and rebuild is what regenerates the PUBLISHED index. Any fix must land in BOTH

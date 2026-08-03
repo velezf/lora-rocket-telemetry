@@ -12,3 +12,8 @@ venv/
 
 # OS
 .DS_Store
+
+# Agent worktrees: per-session scratch, not project state.
+# Scoped to worktrees/ ONLY — .claude/ itself may later hold tracked agent
+# definitions or settings, and a blanket ignore would silently prevent that.
+.claude/worktrees/

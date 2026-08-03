@@ -63,7 +63,19 @@ Epic 6 **before** Epic 7 (separation at main requires deployment to work). Item 
 redesign) is a **consciously-spent exception** to the admission rule, bounded by its closure bar
 (below); Epic 6 is what actually unblocks flying, so the redesign must not displace it.
 
-### OPEN VERIFICATION — hero glyphs have NOT been judged in daylight
+### Hero glyphs — DAYLIGHT PASS, operator-approved (NOT measured)
+
+**Approved 2026-08-02 at 4 px stroke; goldens unblocked.** Judged outdoors on the real panel via
+the raw-bitmap probe. **Waved through on operator judgement rather than a measured distance** —
+the numbers originally asked for (the distance at which `0689`'s counters stop being distinct,
+and whether `10.2k`'s 4x5 px decimal survives at that distance in direct sun) were NOT recorded.
+Logged that way deliberately rather than as a closed measurement.
+**Bounded, accepted risk:** if the counters turn out to fill outdoors later, the cost is redrawing
+13 glyphs and regenerating goldens. Nothing structural depends on stroke weight — the layout
+derives every horizontal position from `text_width()`/`advance()`, so only the glyphs and the
+goldens would change.
+
+### Superseded: the open-verification note that gated this
 
 **Glyphs approved 2026-08-02 on the real panel** (rendered at true 28px via a raw-bitmap SSH
 probe; `0689` counters, `10.2k` decimal, `k`, `-84`, `1834`). **But the closure bar says "at
@@ -160,6 +172,20 @@ inconsistent with itself** (selector and value boxes show the new flight; the ch
 it). That is worse than either stale-everything or fresh-everything, and far harder to notice.
 Also relevant: the coupling is **pre-existing** (el-nino already carries it) and a failed render
 does **not** take the live site down — gh-pages keeps serving the last good deploy.
+
+### Error pattern worth keeping: SELF-CORRECTION HAS ITS OWN FAILURE MODE
+
+Three diagnostic-vs-signal failures on 2026-08-02, and **the third ran BACKWARDS**. The first two
+were treating a real signal as noise, which teaches you to look harder. The third was the
+opposite: pyright diagnostics were attributed **correctly** the first time, then "corrected" into
+being wrong, and an alarming — entirely false — report of an agent isolation failure was built on
+top of that correction.
+
+**The mechanism: primed to find contamination, contamination was found in evidence that did not
+support it.** Looking harder has its own bias. A correction is a claim like any other and needs
+the same verification as the thing it corrects — running it, not reasoning about it. This one was
+caught only by checking `pwd` from an absolute path, which is also why rule 10 is mechanical
+rather than a reminder.
 
 **Rules that must survive the context break** — full text under "Working rules":
 - **Admission rule:** admit only if it **(a)** prevents lost flight data, a corrupted record, or
@@ -342,6 +368,25 @@ Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + A
 `feat/callsign-id`, `feat/flight-logging` (+ earlier Epic 1–3 branches).
 
 ## Locked decisions
+
+- **NON-TELEMETRY FRAMES DO NOT PARTICIPATE IN FLIGHT ACCOUNTING (decided 2026-08-02).**
+  A `CALL` beacon is the station identifying itself under Part 97 — **evidence the radio is
+  alive, not evidence about the flight.** This is the **foreign-traffic rule applied to a second
+  class of non-telemetry frame**: counted and segregated, never merged. Canonical statement of
+  that precedent is `ground/ingest/core.py:12` — do not restate it here.
+  1. **`packets_rx` EXCLUDES beacons; count them separately as `beacons_rx`.** They carry no
+     `SEQ`, so they cannot participate in loss accounting — putting them in the denominator while
+     they are absent from the sequence space would make the published loss percentage read
+     artificially **LOW**. Visible, not discarded.
+  2. **Beacons DO NOT reset the silence timeout and DO NOT extend `t_end`.** The 90 s rule detects
+     "the vehicle stopped sending telemetry". If beacons held a flight open, a landed rocket
+     beaconing every 60 s would **never close** — it would run until the battery died, and
+     `duration_s` would become the interval between ID transmissions rather than the flight.
+     **The flight must not be defined by its callsign.**
+  **GENERALISES INTO `draft-0004`:** the principle underneath both halves is *"frames that are not
+  telemetry do not participate in flight accounting"*. Stated that way it also covers **dump
+  frames** if C2 is ever built, and it means the THIRD class resolves itself without a new
+  decision. Flagged for the draft; naming the principle is the point.
 
 - **Packet format v1** ([ADR 0001](adr/0001-packet-format-v1.md)): keyed `KEY:VALUE` ASCII,
   leading `V:1`; `MET` time token; **no app-layer checksum** (rely on LoRa PHY CRC); `SYS`
@@ -1016,6 +1061,12 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   counter (per-observer) surfaced in the health dict alongside `decode_errors`, so isolation
   degrades loudly instead of silently. Small, and it makes a whole class of future consumer bugs
   self-reporting.
+- **`ground/flights/cli.py:53` prints `peak=Noneft` for a manually-opened flight.** Visible tail
+  of the `force_open` seed change in `004744f` — seeding `peak=None` instead of a phantom `0` is
+  correct (same sentinel-vs-legal-value bug in a third place, and endorsed), but the listing now
+  renders a string that reads like a crash. Small and user-facing. **Fix in whichever stream
+  touches `cli.py` next**; do not leave it. Trigger: any `ground/flights/` work, or the first
+  person confused by the output.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

@@ -65,8 +65,16 @@ they must not paraphrase it** — same discipline as ADR 0003 and the deploy pat
    tasks that need none, so exclusivity never depends on an announce/release protocol holding
    under pressure. *(A probe stopping `apogee-ingest` is why this can't be implicit.)*
 2. **Own branch/worktree; no two streams touch the same file.** Held on day one.
-3. **No agent commits, merges, pushes or tags.** They stop at the gate and report. Merges stay
-   serial through Frank.
+3. **Agents COMMIT to their own branch. They never merge, never push, never tag, never touch
+   `main`.** The gate is MERGE AND PUSH, not commit — which fully preserves the intent ("no agent
+   lands work on `main` without approval") while fixing four things the original wording broke:
+   - **Uncommitted work cannot be reviewed with normal tools.** "Read the agent's diff" had no
+     diff to read; `git merge` on a branch with zero commits is a silent no-op.
+   - **It cannot be parked under rule 7** — a stream that ends the session uncommitted evaporates.
+   - **It is destroyed by a stray checkout**, which nearly happened on 2026-08-02.
+   - **A commit has a hash**, so claims about it can be verified — which is what this project's
+     whole verification discipline turns on.
+   *(Second rule to need correcting. The first was rule 10.)*
 4. **No exploring new ideas inline.** Anything noticed goes to the stream's scratch file with the
    concrete trigger that would revive it.
 5. **Each stream reports independently**, so reviews happen separately rather than as one blob.
@@ -93,6 +101,18 @@ they must not paraphrase it** — same discipline as ADR 0003 and the deploy pat
 11. **Verify agent claims before relaying them.** Subagent reports are evidence, not findings.
     Three of today's were verified: two confirmed and materially corrected the main thread's
     picture; one was a base-commit artifact. Relaying unverified would have propagated all three.
+
+12. **APPROVALS ARE AFFIRMATIVE AND EXPLICIT — and the default on ambiguity is STOP AND ASK.**
+    A gate is cleared by "APPROVED: merge" / "APPROVED: push", never inferred from a phrase that
+    *could* be read as clearance. **If an instruction has two readings and one of them authorises
+    an irreversible action against a standing rule, that ambiguity is itself the signal to pause.**
+    A push to a public remote is irreversible in practice.
+    *(2026-08-02: "gate me on the merge, not the analysis" has two honest readings — "the merge is
+    where you ask me" and "the merge is cleared". The convenient one was taken and `main` was
+    merged and pushed without the approval the author intended to give. Same shape as rule 10:
+    not carelessness, an unverified assumption that happened to be convenient. Both halves of that
+    exchange matter — an ambiguous prompt and a self-serving reading — and neither is fixed by
+    trying harder.)*
 
 ### Related rules that already existed and still apply
 

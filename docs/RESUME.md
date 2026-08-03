@@ -63,6 +63,39 @@ Epic 6 **before** Epic 7 (separation at main requires deployment to work). Item 
 redesign) is a **consciously-spent exception** to the admission rule, bounded by its closure bar
 (below); Epic 6 is what actually unblocks flying, so the redesign must not displace it.
 
+### Hero glyphs — DAYLIGHT PASS, operator-approved (NOT measured)
+
+**Approved 2026-08-02 at 4 px stroke; goldens unblocked.** Judged outdoors on the real panel via
+the raw-bitmap probe. **Waved through on operator judgement rather than a measured distance** —
+the numbers originally asked for (the distance at which `0689`'s counters stop being distinct,
+and whether `10.2k`'s 4x5 px decimal survives at that distance in direct sun) were NOT recorded.
+Logged that way deliberately rather than as a closed measurement.
+**STILL OPEN, for TWO independent reasons** — (a) the distances asked for (where `0689`'s
+counters stop being distinct; whether `10.2k`'s decimal survives at that distance in direct sun)
+were never recorded, so this is an approval rather than a measurement; and (b) the probe was
+confirmed running by `pgrep -f`, **which can match its own command line** — see the hollow-guard
+failure class — so the verification itself may have been hollow. An open item should say WHY it
+is open.
+**Bounded, accepted risk:** if the counters turn out to fill outdoors later, the cost is redrawing
+13 glyphs and regenerating goldens. Nothing structural depends on stroke weight — the layout
+derives every horizontal position from `text_width()`/`advance()`, so only the glyphs and the
+goldens would change.
+
+### Superseded: the open-verification note that gated this
+
+**Glyphs approved 2026-08-02 on the real panel** (rendered at true 28px via a raw-bitmap SSH
+probe; `0689` counters, `10.2k` decimal, `k`, `-84`, `1834`). **But the closure bar says "at
+arm's length IN DAYLIGHT", and the lighting of that judgement was not recorded — so the daylight
+half is OPEN, not closed.** Same rule as evidence-must-describe-the-artifact: an indoor pass does
+not license a daylight claim.
+**Confirm outdoors BEFORE the redesign merges.** The specific risk is `0689`: 4 px strokes around
+a 6 px counter. Sunlight lowers effective contrast, so counters that hold indoors can fill at
+distance outdoors. If they do, **stroke drops to 3 px and all 13 glyphs are redrawn** — which
+also invalidates every metric derived from them (`10.2k` = 70 px of 128, the hero band budget,
+and any goldens generated in the meantime). **Do not generate goldens until daylight passes.**
+Also unrecorded and worth capturing when confirmed: the distance at which `0689` counters stop
+being distinct, and which frame is hardest at ten feet — that sets the real legibility floor.
+
 ### Item 3 closure bar (ACCEPTED 2026-08-02) — the redesign is DONE when...
 
 At arm's length in daylight, the operator can answer **four questions** without touching the box:
@@ -145,6 +178,20 @@ inconsistent with itself** (selector and value boxes show the new flight; the ch
 it). That is worse than either stale-everything or fresh-everything, and far harder to notice.
 Also relevant: the coupling is **pre-existing** (el-nino already carries it) and a failed render
 does **not** take the live site down — gh-pages keeps serving the last good deploy.
+
+### Error pattern worth keeping: SELF-CORRECTION HAS ITS OWN FAILURE MODE
+
+Three diagnostic-vs-signal failures on 2026-08-02, and **the third ran BACKWARDS**. The first two
+were treating a real signal as noise, which teaches you to look harder. The third was the
+opposite: pyright diagnostics were attributed **correctly** the first time, then "corrected" into
+being wrong, and an alarming — entirely false — report of an agent isolation failure was built on
+top of that correction.
+
+**The mechanism: primed to find contamination, contamination was found in evidence that did not
+support it.** Looking harder has its own bias. A correction is a claim like any other and needs
+the same verification as the thing it corrects — running it, not reasoning about it. This one was
+caught only by checking `pwd` from an absolute path, which is also why rule 10 is mechanical
+rather than a reminder.
 
 **Rules that must survive the context break** — full text under "Working rules":
 - **Admission rule:** admit only if it **(a)** prevents lost flight data, a corrupted record, or
@@ -328,6 +375,25 @@ Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + A
 
 ## Locked decisions
 
+- **NON-TELEMETRY FRAMES DO NOT PARTICIPATE IN FLIGHT ACCOUNTING (decided 2026-08-02).**
+  A `CALL` beacon is the station identifying itself under Part 97 — **evidence the radio is
+  alive, not evidence about the flight.** This is the **foreign-traffic rule applied to a second
+  class of non-telemetry frame**: counted and segregated, never merged. Canonical statement of
+  that precedent is `ground/ingest/core.py:12` — do not restate it here.
+  1. **`packets_rx` EXCLUDES beacons; count them separately as `beacons_rx`.** They carry no
+     `SEQ`, so they cannot participate in loss accounting — putting them in the denominator while
+     they are absent from the sequence space would make the published loss percentage read
+     artificially **LOW**. Visible, not discarded.
+  2. **Beacons DO NOT reset the silence timeout and DO NOT extend `t_end`.** The 90 s rule detects
+     "the vehicle stopped sending telemetry". If beacons held a flight open, a landed rocket
+     beaconing every 60 s would **never close** — it would run until the battery died, and
+     `duration_s` would become the interval between ID transmissions rather than the flight.
+     **The flight must not be defined by its callsign.**
+  **GENERALISES INTO `draft-0004`:** the principle underneath both halves is *"frames that are not
+  telemetry do not participate in flight accounting"*. Stated that way it also covers **dump
+  frames** if C2 is ever built, and it means the THIRD class resolves itself without a new
+  decision. Flagged for the draft; naming the principle is the point.
+
 - **Packet format v1** ([ADR 0001](adr/0001-packet-format-v1.md)): keyed `KEY:VALUE` ASCII,
   leading `V:1`; `MET` time token; **no app-layer checksum** (rely on LoRa PHY CRC); `SYS`
   default `7`; `SRC` `1=sled, 2=lander`; additive tags tolerated, unknown tags ignored.
@@ -392,7 +458,13 @@ Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + A
       _Criterion (1) — PiSugar RTC hold — satisfied free by the hiatus:_ the RTC kept correct
       wall-clock across a **~13-day fully-powered-off** span at 69 % with no drain (read back
       `2026-07-27T10:45:47-04:00` on power-up); the 30-min hold test need not be re-run.
-- [ ] **2.2 hotspot field test** — away from home Wi-Fi, confirm fallback to the iPhone hotspot.
+- [ ] **2.2 hotspot field test — PARKED: AWAITING A FIELD TRIP (named state, rule 7).** Away from
+      home Wi-Fi, confirm fallback to the iPhone hotspot. **The last item of ORIGINAL Epic 1-4
+      scope still open.** Not blocked on any code and not blocking anything — it needs physical
+      absence from the home network, so it cannot be closed at the bench by any amount of work.
+      **Un-park trigger:** the first trip away from home Wi-Fi with the box, which the first
+      launch satisfies by construction. Doubles as the marker-vs-NTP clock check (the clock gate
+      must pass on the RTC marker, not on NTP that only arrives later).
 - [x] **Live shake test — done 2026-07-08** (see first flight below); hand-*jerk* peaked 2.2 g
       (missed the 1 Hz sample), a sustained **circular swing** hit 6.4 g and tripped it.
 
@@ -632,6 +704,17 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   Fix: have `restore_clock`/
   `attest_clock` write the reason INTO the marker (they touch it empty today) so `B_CLOCK` (pos 2) can blink
   on attest. Small follow-up to the clock module.
+- **`feat/drift-guards` — EVIDENCE UPDATE 2026-08-02: a drift-shaped failure fired, but NOT the
+  predicted one.** Within an hour of starting parallel agents something drift-shaped did occur —
+  and it was **NOT agent contamination**. An earlier claim in this session that it was is wrong,
+  and was amplified before being checked. **Actual mechanism: an unverified assumption about the
+  assistant's OWN working state.** The Bash tool persists working directory between calls; one
+  earlier `cd` into an agent worktree silently relocated six subsequent "my repo" commands. `git`
+  answered honestly — about a tree nobody meant to be in — producing an alarming and entirely
+  false report of an isolation failure. **Worktree isolation held; rule 2 was never violated.**
+  **What this is evidence FOR:** mechanical verification of assumed state, not a doc-drift
+  detector. The cheap fix is rule 10 in `CLAUDE.md` (absolute-path discipline); try that before
+  building any guard.
 - **`feat/drift-guards` — NOT NOW, deliberately deferred (2026-07-31).** Would pair a
   non-duplication test with the unit-install guard below. **Deferred because the sanctioned
   deploy path removes most of the mechanism it would detect:** hand-copying happened because
@@ -759,6 +842,303 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   present on clean `main`. The repo used to report **pyright 0**, so this is drift: pyright is
   not part of any gate, and nothing ran it on that branch. Fix both, and consider adding
   `venvPath`/`venv` to `pyrightconfig.json` so the pytest import resolves.
+- **A — GROUND MUST USE THE SLED'S `Max`, NOT `max(received ALT)` (ADMISSIBLE; queue after the
+  OLED redesign, AHEAD of pin-the-deps).** `ground/flights/segmenter.py:78` computes
+  `fl["peak_alt"] = max(fl["peak_alt"], alt)` from RECEIVED packets, while the dashboard/OLED use
+  the sled's onboard `Max` (`ground/dashboard/model.py:79`). **Two peaks, two answers.** The sled
+  already computes a running max at its sampling rate and transmits it in EVERY packet, so the
+  ground needs any ONE post-apogee packet to be correct — whereas `max(received ALT)` loses the
+  peak to a single drop at the wrong instant, silently, on the headline number of a public page.
+  **Admission: passes (a)** — a corrupted published record. **Passes (b)** — not an observed wrong
+  number (F1 agrees at -74 by luck) but a demonstrably present mechanism: F1 lost 1 of 76 packets
+  (1.32%) and loss near apogee is the likely case. A signal that actively lies; the lie has not
+  been called yet.
+  **TRAP — `Max:0` is not a sentinel.** The firmware sends `Max:0` before launch and **0 is a
+  valid altitude**. Naively maxing `Max` over F1 yields `0`, which against baseline -84 would
+  publish **+84 ft AGL** for a flight that reached 10. Any switch MUST ignore `Max` while `St==0`.
+  Cost: ~10 lines + tests, no firmware, no airtime, no ADR change.
+- **B-decoupled — SEPARATE THE SAMPLE RATE FROM THE TX RATE IN `loop()`.** Today they are the
+  same thing: `firmware/src/main.cpp` `loop()` reads BMP+ADXL, updates the detectors, transmits,
+  then `delay(1000)`. One loop = one sample = one packet, so the detectors see **1 sample/second**
+  — which is why the 2026-07-08 shake test's 2.2 g hand-jerk was missed between samples. Sample
+  at ~20 Hz and transmit every 20th iteration: detectors and onboard `Max` run at 20 Hz, airtime
+  is unchanged, no hardware, no wire-format change. ~15 lines.
+  **Note the chicken-and-egg that kills the simpler idea:** a `St`-dependent TX rate (the Epic 6
+  rider) canNOT improve launch detection, because you must DETECT launch to switch rates and
+  detection runs at the slow rate. It improves boost/coast profile fidelity only.
+  **AIRTIME FACTS (measured 2026-08-02, not estimated).** SF7 / BW125 / CR4/5, real payload
+  82-88 B (+4 RadioHead) ~= 92 B -> **ToA 159 ms**, **max ~6.3 packets/s**, **duty at 1 Hz =
+  15.9%**. So **10 Hz is NOT achievable at this config** — 5 Hz (79% duty) is the ceiling; 10 Hz
+  would need BW250 (-3 dB) or a shorter boost-mode payload (-> ADR bump). SF trade, ~2x airtime
+  per step for ~+2.5 dB: SF8 287 ms / 3.5 per s · SF9 513 ms / 2.0 · SF10 944 ms / 1.06.
+  **Part 97 under KC3ZTQ: NO duty-cycle regulation applies** (that is an EU 868 ISM rule). The
+  only limits are airtime, link budget, and the 10-minute station ID already handled.
+- **C — onboard high-rate logging (NICE-TO-HAVE, NOT on the honesty path).** **A + B-decoupled
+  already make the published peak accurate to 20 Hz sampling and effectively loss-proof** (it
+  needs one post-apogee packet). Peak is the only published figure at risk — duration is
+  timestamp-derived, loss% is SEQ-derived, RSSI is link-side. **So logging buys the high-rate
+  CURVE, not honest NUMBERS.**
+  **Memory, measured from the build (`pio run -e feather_m0_tx`), not the datasheet:** SAMD21G18A,
+  32,768 B SRAM / 262,144 B flash, no SD, no SPI flash. Static use **5,736 B (17.5%)**, flash
+  55,868 B (21.3%) — so ~27 KB nominally free, but the Arduino SAMD linker reserves **8 KB of
+  stack**, leaving **~18.8 KB safely usable**. ~206 KB of flash is unused.
+  **Record budget for a ~120 s L1 flight:** at a FIXED rate, time is implicit in the index (saves
+  4 B/sample). 2,400 samples @ 4 B (`alt`,`g`) = 9,600 B (fits); @ 6 B (+`pg`) = 14,400 B (tight);
+  @ 8 B = 19,200 B (over). **MIXED RATE WINS BY 3-6x:** 20 Hz through boost+coast (15 s = 300) +
+  1 Hz under chute (85 s = 85) = **385 samples; at 8 B with an explicit timestamp = 3,080 B**,
+  leaving ~15.7 KB margin.
+  **Two catches.** (1) **SRAM is volatile and the loss window IS the danger moment** — a brownout
+  or reset on LANDING SHOCK destroys the record, which is disqualifying for "the record" and fine
+  for "a chart". Mitigation: dump to flash **at apogee**, not at landing — the vehicle is quietest
+  and boost+coast is already complete. (2) **USB download after every flight** is friction and a
+  manual step that will eventually be forgotten (same reliability shape as remembering to
+  re-render `_freeze`), plus a firmware command handler and a ground-side import path.
+  **Storage model if ever built:** NOT a fourth writer — a new **immutable derivation input**
+  (`index = f(session, ops, recovered?)`), so one-writer-per-file survives and byte-identical
+  rebuild survives provided the recovered file is immutable and versioned. **Never merge it into
+  the session log**, which must keep meaning "what the ground heard" or the link record is
+  destroyed. **`SEQ` is the join key** (the onboard clock is `millis()`, the ground's is wall
+  time). **Provenance is mandatory** — each value must record air-vs-card, or a recovered peak is
+  indistinguishable from a received one.
+- **C2 — RADIO DUMP of the in-RAM high-rate buffer (refinement of C; still NOT on the honesty
+  path).** Buffer 20 Hz in RAM, replay it over the radio DURING DESCENT, no flash and no USB step.
+  Strictly better than C: it removes the manual download and the landing-shock bet. **But with
+  B-decoupled, onboard `Max` is already 20 Hz-accurate and transmitted every packet, so the dump
+  improves ZERO published numbers.** It buys the CURVE between samples. Work estimate: **5-10x A**
+  (firmware ring buffer + chunked dump protocol + ADR amendment + decoder frame-type classifier +
+  ground collector + join/validate + coverage-aware derivation + hash provenance) for no accuracy
+  gain. Build only if the high-rate curve is wanted for its own sake.
+  **DUMP DURING DESCENT, not after landing.** Landing is the worst moment — vehicle horizontal,
+  antenna in grass, max downrange, possibly behind terrain — and landing shock is the event most
+  likely to brown out the MCU, so post-landing dumping bets the record on surviving the riskiest
+  event first. Under chute: ~85 s, high, line-of-sight, slow and roughly upright (better antenna
+  orientation than tumbling coast), with boost+coast already complete in the buffer. Residual
+  volatility risk shrinks from "landing shock" (likely) to "brownout during boost" (much less so).
+  **Limits:** a 500 ft flight gives a ~28 s descent = one pass only; **a chute failure gives ~10 s
+  ballistic and essentially no dump** — precisely the flight you would most want it from.
+  **AIRTIME (measured 2026-08-02).** 3,080 B binary -> 4,108 chars base64 (+33%). RadioHead allows
+  **251 B frames** vs the 92 B used today, which more than compensates: **21 packets, ToA 394 ms,
+  8.3 s total**. Descent budget: 1x = 9.7% duty, **3x = 29.2% (+15.9% live = 45.1%)**. Three
+  redundant passes fit comfortably.
+  **It is a JOIN, not a merge — one authoritative source per field.** LINK fields (RSSI, loss,
+  timing) come from the session ONLY and always: the vehicle cannot know its own RSSI. VEHICLE
+  fields (alt, g, pg) come from the dump where covered AND validated, else the session. The
+  session log must keep meaning "what the ground heard" or the link record is destroyed.
+  **SEQ join:** do NOT infer anchors — the firmware knows `(buffer_index, SEQ)` at TX time and
+  must record them explicitly; inference breaks on any skipped or delayed TX. SEQ wrap is a
+  non-issue within a flight (65535 at 1 Hz = 18.2 h); guard with a monotonicity check, and a
+  decreasing SEQ invalidates the join. **Start buffering AT LAUNCH DETECT** so the buffer can
+  never start mid-flight, plus a ~2 s / 40-sample / 320 B pre-launch ring to capture the launch
+  transient that 1 Hz detection misses entirely.
+  **OVERLAP IS A FREE INTEGRITY CHECK — and must FAIL CLOSED.** Transmitted samples appear in both
+  records and must agree exactly. On any mismatch, invalidate the JOIN (not just the sample), fall
+  back to session-only derivation, and record the mismatch count in the index. A partially-trusted
+  dump is the worst option: you cannot tell which half lied.
+  **PARTIAL DUMPS:** per-time-range authority, and **which chunks arrived must be recorded in the
+  dump artifact itself**, not reconstructed at rebuild time — otherwise "which source won where"
+  depends on when you rebuilt and determinism is gone.
+  **BYTE-IDENTICAL REBUILD SURVIVES — but only with a HASH.** The index must record the dump's
+  content hash AND coverage, not merely that one was used. Without it, a session-only rebuild and
+  a with-dump rebuild both claim to be *the* rebuild of that flight and nothing distinguishes
+  them. `index = f(session, ops, dump?)` is a function only if `dump?` is identified.
+  **PROTOCOL — the real trap, and it is worse than an ADR question.** ADR-0001's "unknown tags
+  ignored" clause is exactly what makes this unsafe: a dump frame with no `ALT`/`St` does not look
+  like a new frame type to the current decoder, it looks like a MALFORMED TELEMETRY PACKET.
+  **And if dump frames carry `SEQ` they inject into the sequence space and manufacture fake gaps
+  in `LinkStats`, corrupting the published loss percentage on every dump.** So: syntactically
+  additive, semantically a NEW FRAME TYPE. Needs an **ADR amendment** defining frame-type
+  classification BEFORE field interpretation, and dump frames must carry their own counter, never
+  `SEQ`. Likely not a `V` bump (no existing tag changes meaning) but definitely an ADR + decoder
+  change.
+  **LOSS FORK — looping (a) wins decisively.** 3x redundancy costs 45% duty, which is affordable,
+  while a reverse link (b) costs: a TX path on the Pi (the driver is RX-only today), a Part 97 ID
+  obligation once the ground station transmits, a half-duplex conflict during the most valuable
+  telemetry window, a sled RX window competing with sampling, and it forfeits the quietly valuable
+  property that the ground station currently CANNOT transmit. Improve (a) by interleaving chunks
+  with live telemetry and rotating chunk order between passes, so the three passes fail
+  independently against fading instead of all missing the same fade.
+- **BLOCKER ON EPIC 6 (`CALL` beaconing) AND LIKELY EPIC 7 (lander) — a frame missing `SEQ`
+  or `ALT` corrupts published numbers catastrophically. MEASURED 2026-08-02 through the REAL
+  consumer path.**
+  **CORRECTION to an earlier entry in this file:** the defect is NOT partial mutation in
+  `FlightSegmenter.observe()`. That path is UNREACHABLE from the live flow, because
+  `ground/flights/live.py:38-39` already coalesces. The first demonstration called `observe()`
+  directly and bypassed the very guard that exists — a badly constructed test, corrected here.
+  **The real defect is SENTINEL COALESCING — `None -> 0`, where `0` is a VALID value for both
+  fields.** `on_observation` does `f.get("ALT") if ... else 0` and `f.get("SEQ") if ... else 0`.
+  Consequences, measured on identical received frames with one beacon substituted mid-flight:
+  | field | telemetry | CALL beacon |
+  |---|---|---|
+  | `packets_lost` | 0 | **65,536** (`gaps += (0 - last_seq - 1) % 65536` wraps) |
+  | `peak_alt_ft` (F1-shaped, negative raw) | -74 | **0** |
+  | published peak AGL | 10 ft | **84 ft** |
+  `loss_pct` would read ~100%. The `+84` is the SAME shape as the `Max:0` trap in the `Max`
+  item — different code path, identical cause: a sentinel that collides with a legal value.
+  **NOT LIVE TODAY.** Three gates prevent it: `firmware/lib/packet/packet.cpp` emits `SEQ` and
+  `ALT` unconditionally; the RX driver is CRC-enforcing so truncated frames never decode; and
+  foreign-SYS / unknown-SRC are filtered upstream. It arrives with **beaconing (Epic 6)** and
+  plausibly the **lander (Epic 7)**, whose packet carries BME/APDS fields and may omit `ALT`.
+  **Fix:** stop coalescing. `observe()` should take optional values and SKIP the fields it cannot
+  compute, while advancing `last_seq` only when a real `SEQ` is present. Bundle with the `Max`
+  item — same trap, same module, one review. **Defence in depth, separately worth doing:** make
+  `observe()` atomic (compute, then commit) so no future raise can leave half-mutated state.
+- **`ObserverRegistry.dispatch` swallows consumer failures with NO counter and NO log.** The
+  isolation is correct and deliberate (D4: one bad consumer must never take down the radio loop),
+  but `except Exception: pass` means a consumer can fail on EVERY packet and nothing anywhere
+  says so. It hides failures in every consumer — OLED, dashboard, LiveFlights.
+  **Wiring assessment — do NOT route this to RED.** RED means exactly one thing: NOT RECORDING.
+  A consumer failure does not stop recording: the session log is written by `sink` inside
+  `core.handle`, **not** through the registry, so raw packets still land durably and an offline
+  `rebuild` still yields a correct index. Firing RED on a consumer error would make it lie while
+  recording is fine. It also must NOT be used to "activate" RED's INERT write-failure leg — that
+  leg needs the queue-backed WRITER's health flag, the actual not-recording condition; substituting
+  a different signal would make RED mean two things and neither precisely, on the highest-stakes
+  indicator on the panel.
+  **Correct home:** a `consumer_errors` counter (per-observer) in the ingest heartbeat state file
+  as DATA, plus the dashboard health dict alongside `decode_errors`, plus journald. Counted and
+  visible, not an LED. Makes a whole class of future consumer bugs self-reporting.
+- **FRAME CLASSIFICATION IS ALREADY HAPPENING, SIX TIMES, UNOWNED (census 2026-08-02).** REPLACES
+  the earlier three-site framing. Every site independently re-guesses "is this frame telemetry?"
+  from whichever field it happens to need:
+  | # | Site | Predicate | Silently does to a failing frame |
+  |---|---|---|---|
+  | A | `flights/live.py:32-39` | **none** | everything reaches the segmenter; `ALT`/`SEQ` coerced to 0 |
+  | B | `flights/derive.py:45` | `St is not None` | **dropped — no counter, no event, no log** |
+  | C | `ingest/core.py:78` | `"SEQ" in f` | skipped for loss accounting (right outcome, unnamed) |
+  | D | `ingest/core.py:61,83` | `unknown.get("CALL")` | inverse classifier; also fires on telemetry frames |
+  | E | `dashboard/model.py:57-59` | `SRC is None -> return` | a beacon HAS `SRC`, so it passes and clobbers the panel |
+  | F | `flights/export.py:20` | `type=="packet"` + src match | **emits an all-null row into the PUBLISHED per-flight CSV** |
+  **Row F is the strongest beaconing evidence we have** — VERIFIED by running it: a beacon inside a
+  flight's window becomes a CSV row with all eleven telemetry columns null, in the file the public
+  flights page plots. Only census row reaching a public artifact.
+  **Rows A and B are the same decision made twice, and they DISAGREE** on identical input —
+  undetected for the whole of Epic 4. So `draft-0004` is **replacement, not addition**.
+  **Instructive contrast:** `core.py:63,70` gate on SYS/SRC policy and get it RIGHT — a failing
+  frame is counted (`foreign`, `anomalies`) AND written as an advisory event. Network-policy
+  failures are surfaced; frame-shape failures are not. Hence: **a frame that fails classification
+  must be counted and surfaced, never silently dropped**, or the amendment relocates row B's silence.
+  **Forward mis-fire:** an Epic 7 lander frame (`SRC:2`, no `St`) is silently dropped from flight
+  derivation — no anomaly, no event, no error. Same class as `ObserverRegistry.dispatch`'s bare
+  `except Exception: pass`: correct-in-intent isolation that discards the evidence it fired.
+- **ARCHITECTURE CLASS — "sentinel colliding with a legal value". The v1 wire format has no way
+  to express ABSENT distinctly from ZERO, and every ground consumer that coalesces `None -> 0`
+  inherits it.** Three instances found so far are one defect shape, not three bugs: `Max:0` sent
+  pre-launch (0 is a valid altitude), `SEQ -> 0` on an absent tag (0 is a valid sequence number),
+  `ALT -> 0` on an absent tag (0 is a valid altitude).
+  **TARGETED SWEEP of `ground/` (2026-08-02) — the blast radius is SMALL and bounded:**
+  | site | path | coalesces | verdict |
+  |---|---|---|---|
+  | `flights/live.py:38-39` | live | `ALT->0`, `SEQ->0` | **LOAD-BEARING** |
+  | `flights/derive.py:62-63` | **offline rebuild** | `ALT->0`, `SEQ->0` | **LOAD-BEARING** |
+  | `oled/render.py:19` | display | `seq_loss_pct->0` | cosmetic (uses `--` for RSSI but `0` for loss) |
+  | `oled/spec.py:132` | sort key | `src->0` | safe — panels always carry `src` |
+  | `dashboard/model.py:118-119`, `publish/data.py:29`, `linkstats.py:39-44` | counters | `->0` | safe — counters legitimately start at 0 |
+  No `or 0` anywhere. **The DECODER is clean**: absent tags never enter `fields`, so
+  `fields.get("ALT")` correctly returns `None`. Every instance is DOWNSTREAM coalescing.
+  **CORRECTION (2026-08-02, after `fcdc86a` claimed otherwise): the offline REBUILD was NEVER
+  exposed to a bare beacon.** `derive.py:45` admits only records where `fields.get("St") is not
+  None`, and a bare `CALL` beacon carries no `St`, so it is dropped before segmentation. The
+  corruption is **LIVE-PATH ONLY**. `fcdc86a` asserted a second broken site *without running it* —
+  the same failure as the earlier `observe()`-direct demonstration, one level up. **An agent
+  checking the claim caught it**, and it would otherwise have been carried forward as fact.
+  The honest framing is sharper than the wrong one: the LIVE record contradicts what a REBUILD
+  produces from the same session, so `flight_close` and `flights-snapshot.json` disagree with the
+  canonical index. Both coalescing sites are still worth fixing — a genuine telemetry frame that
+  carries `St` but omits `ALT` is legal under ADR 0001 and hits `derive.py:62-63` for real.
+  ~~The offline REBUILD has the same defect as the live path~~ — so a session log containing one
+  beacon reproduces `packets_lost = 65,536` on every `flights rebuild`, **byte-identically**.
+  Determinism does not protect against a wrong sentinel; it reproduces the wrong number
+  faithfully, and rebuild is what regenerates the PUBLISHED index. Any fix must land in BOTH
+  sites or live and rebuild will silently disagree.
+  **OPEN QUESTION FOR ADR-0001 — state it, decide it deliberately, do NOT answer it in passing.**
+  Should the wire format gain an explicit ABSENT representation, or is "the ground never
+  coalesces" a sufficient rule? Arguments both ways: a wire-level absent marker costs airtime on
+  every packet and touches the locked v1 contract (the e2e fixture gate protects it); a
+  ground-side rule costs nothing but must be re-enforced at every new consumer forever, and has
+  already been violated twice in two modules. **This arrives again with Epic 7**: the lander
+  carries BME/APDS fields and may legitimately omit `ALT`, so a node whose packets have no
+  altitude is a REAL case, not a hypothetical. Decide before Epic 7 wiring, not during.
+- **ADR amendment: classify FRAME TYPE before interpreting fields (arrives WITHOUT C2).** The
+  frame-type problem is on a path we are actually taking, not a hypothetical one: `CALL`
+  beaconing is an Epic 6 rider and produces exactly the no-`ALT`/no-`St` shape analysed under C2.
+  ADR-0001 v1's "unknown tags ignored / missing tags valid" clauses mean such frames are
+  *syntactically valid telemetry* to every consumer, which is how the loss-inflation bug above
+  arises. Amendment should define a frame-type tag and require classification BEFORE field
+  interpretation. Likely **not** a `V` bump (no existing tag changes meaning). Reasoning and the
+  dump-frame variant are in the C2 entry — cite, do not restate.
+- **`ObserverRegistry.dispatch` swallows consumer failures with NO counter and NO log.** The
+  isolation is correct and deliberate (D4: a consumer must never break the radio loop), but
+  `except Exception: pass` means a consumer can fail on **every packet** and nothing anywhere
+  says so — which is precisely how the beacon bug above stays invisible. Add an observer-error
+  counter (per-observer) surfaced in the health dict alongside `decode_errors`, so isolation
+  degrades loudly instead of silently. Small, and it makes a whole class of future consumer bugs
+  self-reporting.
+- **`ground/flights/cli.py:53` prints `peak=Noneft` for a manually-opened flight.** Visible tail
+  of the `force_open` seed change in `004744f` — seeding `peak=None` instead of a phantom `0` is
+  correct (same sentinel-vs-legal-value bug in a third place, and endorsed), but the listing now
+  renders a string that reads like a crash. Small and user-facing. **Fix in whichever stream
+  touches `cli.py` next**; do not leave it. Trigger: any `ground/flights/` work, or the first
+  person confused by the output.
+- **EPIC 6 PREREQUISITES — two latent DEPLOYMENT hazards, both verified by reading the code.
+  Neither is an Epic 6 line item; both must land BEFORE any relay work starts.**
+  1. **`firmware/lib/apogee/apogee.h` is disqualified as a fire trigger.** It declares apogee
+     on the FIRST sample not strictly greater than the running max, and `descending_` latches
+     permanently. No hysteresis, no dwell, no confirmation. One noisy boost sample — turbulence,
+     transonic, a pressure spike — commands a charge **at max-Q, irrecoverably**. Harmless today
+     ONLY because nothing is wired to it; that is what LATENT means. Needs hysteresis + dwell +
+     confirmation as a stated prerequisite of 6.2.
+  2. **`firmware/src/main.cpp:89` returns from the WHOLE loop on a failed `bmp.performReading()`.**
+     A deploy tick below it — including **the tick that de-energizes a relay at the end of its
+     firing pulse** — would be skipped by one failed I2C read. A charge stays hot, triggered by
+     exactly the condition where the safe state matters most. **Third instance of "one failure
+     path takes out an unrelated responsibility"** (after OLED-on-the-RX-thread and
+     `ObserverRegistry`'s silent swallow). Extra edge found on inspection: the `return` is BEFORE
+     `delay(1000)`, so persistent barometer failure busy-loops at full speed — minor today,
+     but combined with relay control it is a fast-spinning loop holding a hot charge.
+  **`B-decoupled` is the third prerequisite** (sample at 20 Hz, transmit at 1 Hz). Re-derived
+  independently: 1.11 s of physics to detect a 20 ft drop, paid at any rate; at 1 Hz a robust
+  criterion costs ~4 s -> **257.6 ft fallen at 128.8 ft/s**, at 20 Hz ~1.3 s -> **27.2 ft at
+  41.9 ft/s**. **THERE IS NO SAFE 1 Hz CONFIGURATION** — robust enough not to false-fire deploys
+  off-vertical at speed, weak enough to fit 1 Hz IS the single-dip detector that fires at max-Q.
+  That reclassifies the 1 Hz choice **from a resolution limit to a safety constraint**. The two
+  caveats (BMP390's real delivered rate at the configured OSR; `COEFF_3` being a different filter
+  in time at 20 Hz) gate the CONSTANTS, not the decision.
+- **The baseline-unlock defect DOES NOT REPRODUCE CASUALLY — pair this with the self-correction
+  entry.** The first repro attempt FAILED: with a beacon immediately after the boost frame, the
+  re-lock coincidentally recomputed the same `-84` because pre-boost samples still filled the
+  window after `EXCLUDE_TAIL`. It only bites once ~2+ flight altitudes are in the window. **Anyone
+  checking by hand would conclude it is absent.** Yesterday's entry says *looking harder has its
+  own bias*; this one says **NOT finding something is weak evidence when the bug is
+  timing-sensitive**; the hollow-guard class says *finding* something is weak evidence too if the
+  instrument cannot fail. Three sides of the same question: how far to trust evidence.
+- **`alt=None` enters `alt_hist` in `dashboard/model.py` while `FlightSegmenter._push_alt` takes
+  the OPPOSITE line — the FOURTH instance of absent-vs-zero.** A beacon pushes a `None` into the
+  baseline history; `pad_baseline` skips it *inside* the window, but the `samples[:-EXCLUDE_TAIL]`
+  slice happens first, so the `None` consumes a slot. Two paths disagree about whether ABSENT is a
+  VALUE, in the file family just fixed. Files under the absent-vs-zero architecture class, not as
+  a dashboard nicety. Trigger: the absent-vs-zero ADR decision, or any `model.py` baseline work.
+- **TRAP, verbatim, for whoever reaches for the obvious fix:** a beacon blanks the dashboard peak
+  tile for one frame (pre-existing, not introduced). Making `peak` **sticky** is the obvious fix
+  and is a trap — **`reset_baseline` does not clear `peak`, so a sticky peak would carry one
+  flight's number onto the NEXT flight's pad.** If peak is made sticky, the clear must be fixed
+  in the same change.
+- **A silent AGL corruption whose only tell is a blanked small field — LYING-DISPLAY class.** When
+  the baseline is lost the dashboard falls back to raw ALT with only a dash in `baseline_ft` as
+  the signal. Belongs on the OLED/LED surface backlog: a "RAW — no baseline" badge on the altitude
+  tile, or the OLED state band. Same class as a lit flight LED after an ingest crash.
+- **`beacons_rx` NOT added to the published `flights.json` schema — deferred, trigger "beaconing
+  lands".** The migration-cost argument for adding it now does not hold: `write_flight_data`
+  REGENERATES `flights.json` wholesale from the derived index on every publish, so there is no
+  migration and no heterogeneous-record risk — adding it later costs exactly the same. Until
+  beaconing exists it would read `0` for every flight and the Quarto page does not consume it.
+  *(Recorded honestly: the premise was asserted without reading the file — the same failure being
+  flagged elsewhere in this document all session.)*
+- **OLED trend strip — DECIDABLE AFTER A FLIGHT, not open-forever.** It cannot be judged from a
+  static pad state. Criterion to judge it against: with real motion it should show a **rising ramp
+  through boost and coast, flatten at apogee, then a shallow steady decline under chute**,
+  autoscaled to the window's own min/max so a slow descent still shows slope. **If it reads as a
+  flat smear during descent the autoscale is not earning the 10 px and the strip should be CUT** —
+  it is the sacrificial element. Do not cut it on silence; decide after the first real flight.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

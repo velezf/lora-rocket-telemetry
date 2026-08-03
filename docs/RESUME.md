@@ -17,7 +17,73 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
-## NEXT SESSION — start here
+## NEXT SESSION — start here: EPIC 6, PHASE 0
+
+**Epic 4 CLOSED. The OLED redesign is MERGED. `main` is clean, three copies identical, single
+branch, no worktrees. Nothing is in flight.** Epic 6 (relay deployment) is next and is the epic
+that actually unblocks flying. **No Epic 6 code has been written.**
+
+### THREE PREREQUISITES — none of them inside Epic 6, all before any relay work
+
+1. **`firmware/lib/apogee/apogee.h` cannot be the fire trigger.** Fires on the first sample not
+   strictly greater than the running max, latches permanently. One noisy boost sample commands a
+   charge **at max-Q, irrecoverably**. Harmless today ONLY because nothing is wired to it.
+2. **`firmware/src/main.cpp:89` returns from the WHOLE loop on a failed `bmp.performReading()`** —
+   skipping any deploy tick below it, including the one that **de-energizes a relay**. A hot
+   charge caused by a sensor glitch.
+3. **`B-decoupled`** (sample 20 Hz, transmit 1 Hz). **There is no safe 1 Hz configuration.**
+
+### PHASE 0 — its own branch, in THIS order (b -> c -> a, deliberately not a/b/c)
+
+- **`6.0b` FIRST — synthetic flight-profile fixture + detector harness.** The measuring instrument
+  for every latency claim in the epic. Nothing downstream can be validated without a profile to
+  run it against.
+- **`6.0c` — pure `ApogeeConfirm`** (hysteresis + dwell), validated against that profile. Its
+  logic is rate-agnostic if dwell is parameterised, so it can be tested at both rates.
+- **`6.0a` LAST — decouple sample rate from TX rate** in `loop()`. Only matters once there is a
+  detector worth feeding at 20 Hz.
+
+**Why this order is stronger than "build the fix first":** with the harness in place, `6.0b`+`6.0c`
+can **PROVE the B-decoupled claim empirically** — run the same detector against the same profile
+at 1 Hz and 20 Hz and MEASURE the deployment latency. Today that claim rests on free-fall
+arithmetic (~257 ft at 128.8 ft/s vs ~27 ft at 41.9 ft/s). This turns it from computed into
+measured, before any firmware is committed to it — which is this project's own evidence standard.
+
+### DECIDED 2026-08-03 — deployment events: ONE EVENT, on a TWO-CHANNEL machine
+
+Apogee-only, which is also the standard L1/L2 configuration and what is actually being flown. The
+second event is a **build-time flag**, not a second design: the state machine is two-channel from
+day one (per-channel spent latch, ch2 gated on ch1 spent), so deferring costs nothing.
+
+**Why not dual-deploy now:** a main charge fires on **absolute AGL**, and **the only AGL number
+this system has ever produced is 10 ft from a hand swing.** Committing a pyro to a number never
+validated against a real climb is the exact pattern this project keeps removing.
+
+**RELAY 2 HAS A COMPETING USE — recorded so it is not foreclosed silently.** A recovery buzzer is
+genuinely valuable for finding a rocket in tall grass. Committing relay 2 to a main charge
+forecloses that, and an invisible decision of that kind is precisely what two days of work went
+into eliminating. **Revive triggers for dual-deploy:** a flight above ~2,500 ft AGL, or measured
+drift exceeding the recovery area.
+
+### CHASE NOW — human and bench lead time, not code lead time
+
+- **EXTERNAL DEPENDENCY ON FRANK (not a code task): the range's deployment-testing bar.** The plan
+  says "tested to your range's bar" and **that bar is not a number anywhere.** Get the actual
+  requirement from the club/RSO. **Blocks 6.1.** Nobody can write it down but Frank.
+- **BENCH TODAY, before buying anything: does the relay coil pull in at LiPo-sagged 3.4-3.7 V?**
+  The Feather has no 5 V rail on battery, and the failure mode is a **SILENT NO-FIRE**. Needs only
+  a bench supply and a relay. **Cheapest of the four open questions and it gates the hardware
+  list** — do it before e-matches or a pyro battery are ordered.
+- **BENCH ALSO: the BMP390's real delivered rate at the configured oversampling**, plus the IIR
+  `COEFF_3` phase lag at 20 Hz (the same coefficient is a different filter in time). These gate
+  `6.0a`'s CONSTANTS, not the decision — and finding out after the restructure is the expensive
+  order.
+
+### Reading
+`docs/epic6-plan.md` (14 units, fail-safe analysis, ground-test protocol, 11 open questions) and
+`docs/adr/draft-0004-frame-type-classification.md` (six-site census; replacement, not addition).
+
+## Previous session's handoff
 
 **`feat/oled-heartbeat` — DONE and MERGED 2026-08-02** (`52e5fe0`). All three items **verified
 LIVE on `apogee-gs`, not asserted**: the idle frame renders on a quiet pad with the liveness

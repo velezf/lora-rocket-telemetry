@@ -130,7 +130,15 @@ failed?"**
 |---|---|---|
 | `pytest … \| tail -1 && git push` | the pipeline's exit status is `tail`'s, which is **always 0** — so "verified, then pushed" was not a gate at all | `pytest … \|\| exit 1` (or `set -o pipefail`) |
 | `pgrep -f "some pattern"` | the checking command's own `bash -c` line **contains the pattern**, so it matches itself | `ps -eo args \| grep <pattern> \| grep -v grep` |
+| `pkill -f "<pattern>"` | **same self-match, but it TERMINATES rather than misleads** — it killed the SSH session whose own command line contained the pattern | resolve PIDs with `ps -eo pid,args`, then `kill <pid>` |
 | a repo command relying on inherited `cwd` | the Bash tool persists cwd between calls; **git answers honestly about the wrong tree** | `cd <ABSOLUTE_REPO_ROOT> && …` (enforced by `.claude/hooks/verify-cwd.sh`) |
+
+**The `pkill` instance is the one to remember, because of its timing.** The self-match class was
+documented at 14:40 and self-inflicted with `pkill` at 16:40 — two hours later, by the author of
+the entry, on the same day. **Writing a failure down does not inoculate you against it.** That is
+the argument for mechanical guards over remembered conventions, and it is why `pkill -f` should be
+treated as categorically more dangerous than `pgrep -f`: the misleading version wastes an hour,
+the terminating version kills whatever was holding the pattern.
 
 **Consequence that must stay visible:** an earlier "PROBE CONFIRMED RUNNING (pgrep-verified)"
 may itself have been a self-match. **So the daylight glyph verification rests on a check that

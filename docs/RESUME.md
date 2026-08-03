@@ -70,6 +70,12 @@ the raw-bitmap probe. **Waved through on operator judgement rather than a measur
 the numbers originally asked for (the distance at which `0689`'s counters stop being distinct,
 and whether `10.2k`'s 4x5 px decimal survives at that distance in direct sun) were NOT recorded.
 Logged that way deliberately rather than as a closed measurement.
+**STILL OPEN, for TWO independent reasons** — (a) the distances asked for (where `0689`'s
+counters stop being distinct; whether `10.2k`'s decimal survives at that distance in direct sun)
+were never recorded, so this is an approval rather than a measurement; and (b) the probe was
+confirmed running by `pgrep -f`, **which can match its own command line** — see the hollow-guard
+failure class — so the verification itself may have been hollow. An open item should say WHY it
+is open.
 **Bounded, accepted risk:** if the counters turn out to fill outdoors later, the cost is redrawing
 13 glyphs and regenerating goldens. Nothing structural depends on stroke weight — the layout
 derives every horizontal position from `text_width()`/`advance()`, so only the glyphs and the
@@ -452,7 +458,13 @@ Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + A
       _Criterion (1) — PiSugar RTC hold — satisfied free by the hiatus:_ the RTC kept correct
       wall-clock across a **~13-day fully-powered-off** span at 69 % with no drain (read back
       `2026-07-27T10:45:47-04:00` on power-up); the 30-min hold test need not be re-run.
-- [ ] **2.2 hotspot field test** — away from home Wi-Fi, confirm fallback to the iPhone hotspot.
+- [ ] **2.2 hotspot field test — PARKED: AWAITING A FIELD TRIP (named state, rule 7).** Away from
+      home Wi-Fi, confirm fallback to the iPhone hotspot. **The last item of ORIGINAL Epic 1-4
+      scope still open.** Not blocked on any code and not blocking anything — it needs physical
+      absence from the home network, so it cannot be closed at the bench by any amount of work.
+      **Un-park trigger:** the first trip away from home Wi-Fi with the box, which the first
+      launch satisfies by construction. Doubles as the marker-vs-NTP clock check (the clock gate
+      must pass on the RTC marker, not on NTP that only arrives later).
 - [x] **Live shake test — done 2026-07-08** (see first flight below); hand-*jerk* peaked 2.2 g
       (missed the 1 Hz sample), a sustained **circular swing** hit 6.4 g and tripped it.
 
@@ -1067,6 +1079,66 @@ for go/no-go. Fuller rationale for each in the backlog entries below.
   renders a string that reads like a crash. Small and user-facing. **Fix in whichever stream
   touches `cli.py` next**; do not leave it. Trigger: any `ground/flights/` work, or the first
   person confused by the output.
+- **EPIC 6 PREREQUISITES — two latent DEPLOYMENT hazards, both verified by reading the code.
+  Neither is an Epic 6 line item; both must land BEFORE any relay work starts.**
+  1. **`firmware/lib/apogee/apogee.h` is disqualified as a fire trigger.** It declares apogee
+     on the FIRST sample not strictly greater than the running max, and `descending_` latches
+     permanently. No hysteresis, no dwell, no confirmation. One noisy boost sample — turbulence,
+     transonic, a pressure spike — commands a charge **at max-Q, irrecoverably**. Harmless today
+     ONLY because nothing is wired to it; that is what LATENT means. Needs hysteresis + dwell +
+     confirmation as a stated prerequisite of 6.2.
+  2. **`firmware/src/main.cpp:89` returns from the WHOLE loop on a failed `bmp.performReading()`.**
+     A deploy tick below it — including **the tick that de-energizes a relay at the end of its
+     firing pulse** — would be skipped by one failed I2C read. A charge stays hot, triggered by
+     exactly the condition where the safe state matters most. **Third instance of "one failure
+     path takes out an unrelated responsibility"** (after OLED-on-the-RX-thread and
+     `ObserverRegistry`'s silent swallow). Extra edge found on inspection: the `return` is BEFORE
+     `delay(1000)`, so persistent barometer failure busy-loops at full speed — minor today,
+     but combined with relay control it is a fast-spinning loop holding a hot charge.
+  **`B-decoupled` is the third prerequisite** (sample at 20 Hz, transmit at 1 Hz). Re-derived
+  independently: 1.11 s of physics to detect a 20 ft drop, paid at any rate; at 1 Hz a robust
+  criterion costs ~4 s -> **257.6 ft fallen at 128.8 ft/s**, at 20 Hz ~1.3 s -> **27.2 ft at
+  41.9 ft/s**. **THERE IS NO SAFE 1 Hz CONFIGURATION** — robust enough not to false-fire deploys
+  off-vertical at speed, weak enough to fit 1 Hz IS the single-dip detector that fires at max-Q.
+  That reclassifies the 1 Hz choice **from a resolution limit to a safety constraint**. The two
+  caveats (BMP390's real delivered rate at the configured OSR; `COEFF_3` being a different filter
+  in time at 20 Hz) gate the CONSTANTS, not the decision.
+- **The baseline-unlock defect DOES NOT REPRODUCE CASUALLY — pair this with the self-correction
+  entry.** The first repro attempt FAILED: with a beacon immediately after the boost frame, the
+  re-lock coincidentally recomputed the same `-84` because pre-boost samples still filled the
+  window after `EXCLUDE_TAIL`. It only bites once ~2+ flight altitudes are in the window. **Anyone
+  checking by hand would conclude it is absent.** Yesterday's entry says *looking harder has its
+  own bias*; this one says **NOT finding something is weak evidence when the bug is
+  timing-sensitive**; the hollow-guard class says *finding* something is weak evidence too if the
+  instrument cannot fail. Three sides of the same question: how far to trust evidence.
+- **`alt=None` enters `alt_hist` in `dashboard/model.py` while `FlightSegmenter._push_alt` takes
+  the OPPOSITE line — the FOURTH instance of absent-vs-zero.** A beacon pushes a `None` into the
+  baseline history; `pad_baseline` skips it *inside* the window, but the `samples[:-EXCLUDE_TAIL]`
+  slice happens first, so the `None` consumes a slot. Two paths disagree about whether ABSENT is a
+  VALUE, in the file family just fixed. Files under the absent-vs-zero architecture class, not as
+  a dashboard nicety. Trigger: the absent-vs-zero ADR decision, or any `model.py` baseline work.
+- **TRAP, verbatim, for whoever reaches for the obvious fix:** a beacon blanks the dashboard peak
+  tile for one frame (pre-existing, not introduced). Making `peak` **sticky** is the obvious fix
+  and is a trap — **`reset_baseline` does not clear `peak`, so a sticky peak would carry one
+  flight's number onto the NEXT flight's pad.** If peak is made sticky, the clear must be fixed
+  in the same change.
+- **A silent AGL corruption whose only tell is a blanked small field — LYING-DISPLAY class.** When
+  the baseline is lost the dashboard falls back to raw ALT with only a dash in `baseline_ft` as
+  the signal. Belongs on the OLED/LED surface backlog: a "RAW — no baseline" badge on the altitude
+  tile, or the OLED state band. Same class as a lit flight LED after an ingest crash.
+- **`beacons_rx` NOT added to the published `flights.json` schema — deferred, trigger "beaconing
+  lands".** The migration-cost argument for adding it now does not hold: `write_flight_data`
+  REGENERATES `flights.json` wholesale from the derived index on every publish, so there is no
+  migration and no heterogeneous-record risk — adding it later costs exactly the same. Until
+  beaconing exists it would read `0` for every flight and the Quarto page does not consume it.
+  *(Recorded honestly: the premise was asserted without reading the file — the same failure being
+  flagged elsewhere in this document all session.)*
+- **OLED trend strip — DECIDABLE AFTER A FLIGHT, not open-forever.** It cannot be judged from a
+  static pad state. Criterion to judge it against: with real motion it should show a **rising ramp
+  through boost and coast, flatten at apogee, then a shallow steady decline under chute**,
+  autoscaled to the window's own min/max so a slow descent still shows slope. **If it reads as a
+  flat smear during descent the autoscale is not earning the 10 px and the strip should be CUT** —
+  it is the sacrificial element. Do not cut it on silence; decide after the first real flight.
 - **Unit-install drift guard** (before Epic 8 replicates this config) — three systemd units
   (`apogee-ingest`, `apogee-rtc-restore`, `apogee-attest`) are **versioned in `ground/ingest/`
   but execute from `/etc/systemd/system/`**, with a hand-recreate step on SD rebuild. Same

@@ -19,6 +19,12 @@ def obs(received_at, src, st, alt, peak, seq, rssi=-60, call=None, met=None):
     return Observation(received_at, rssi, decode(pkt.encode()), 0.0)
 
 
+def beacon(received_at, src, call="KC3ZTQ", rssi=-60):
+    """A bare Part-97 station-ID frame: no St, no ALT, no Max, no SEQ."""
+    pkt = f"V:1 SYS:7 SRC:{src} CALL:{call}"
+    return Observation(received_at, rssi, decode(pkt.encode()), 0.0)
+
+
 class TestLiveState(unittest.TestCase):
     def test_tracks_current_per_src(self):
         s = LiveState()
@@ -175,6 +181,75 @@ class TestBaselineV2Live(unittest.TestCase):
         p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
         self.assertIsNone(p["baseline_ft"])                 # gate rejects -> no lock
         self.assertEqual(p["altitude_ft"], 500)             # raw during the flight
+
+
+class TestPeakGatedOnSt(unittest.TestCase):
+    """`Max` is only trustworthy once the sled has left the pad — the gate is
+    ground.flights.segmenter.max_is_meaningful, imported (never restated) so the
+    dashboard, the OLED and the flights index cannot disagree about `Max`."""
+
+    def test_pad_publishes_no_peak_even_though_the_sled_sends_max_zero(self):
+        s = LiveState()
+        for i in range(18):                                 # quiet pad, raw ALT -84
+            s.update(obs(f"t{i}", 1, 0, -84, 0, i))         # firmware sends Max:0 pre-launch
+        p = view_model(s.snapshot(), {}, {}, {})["panels"][0]
+        self.assertEqual(p["altitude_ft"], 0)               # AGL on the pad is 0 (correct)
+        self.assertIsNone(p["peak_ft"])                     # NOT 84 (the negated pad baseline)
+
+    def test_pad_max_zero_never_reaches_the_snapshot(self):
+        s = LiveState()
+        s.update(obs("t", 1, 0, -84, 0, 1))
+        self.assertIsNone(s.snapshot()[1]["peak"])          # gated at the source, not in the view
+
+    def test_peak_publishes_once_st_leaves_the_pad(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"t{i}", 1, 0, -84, 0, i))
+        s.update(obs("boost", 1, 1, 500, 500, 18))          # St:1 -> Max is meaningful
+        p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
+        self.assertEqual(p["peak_ft"], 584)                 # 500 - (-84), on AGL
+
+    def test_peak_gate_is_the_imported_segmenter_predicate(self):
+        from ground.dashboard import model
+        from ground.flights.segmenter import max_is_meaningful
+        self.assertIs(model.max_is_meaningful, max_is_meaningful)   # imported, not restated
+
+
+class TestFrameWithNoStDoesNotDisturbTheLock(unittest.TestCase):
+    """Absence of `St` means 'no information about flight state' — NOT 'not in
+    flight'. A Part-97 CALL beacon (required every 10 min) carries no St, and it
+    must not unlock the AGL zero mid-flight."""
+
+    def test_call_beacon_midflight_does_not_destroy_the_locked_baseline(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"t{i}", 1, 0, -84, 0, i))         # quiet pad -> baseline -84
+        s.update(obs("boost", 1, 1, 500, 500, 18))          # lock at flight_open
+        s.update(obs("asc1", 1, 1, 900, 900, 19))
+        s.update(beacon("id", 1))                           # Part-97 station ID, no St
+        self.assertEqual(s.snapshot()[1]["locked_baseline"], -84)   # lock SURVIVES the beacon
+        s.update(obs("asc2", 1, 1, 1200, 1200, 20))
+        p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
+        self.assertEqual(p["baseline_ft"], -84)
+        self.assertEqual(p["altitude_ft"], 1284)            # 1200 - (-84), not the raw 1200
+
+    def test_beacon_frame_itself_reports_the_held_baseline(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"t{i}", 1, 0, -84, 0, i))
+        s.update(obs("boost", 1, 1, 500, 500, 18))
+        s.update(beacon("id", 1))
+        p = view_model(s.snapshot(), {}, {1: "F1"}, {})["panels"][0]
+        self.assertEqual(p["baseline_ft"], -84)             # baseline_ft does not blank
+
+    def test_beacon_on_the_pad_does_not_lock_a_baseline(self):
+        s = LiveState()
+        for i in range(18):
+            s.update(obs(f"t{i}", 1, 0, -84, 0, i))
+        s.update(beacon("id", 1))                           # no St -> no state change either way
+        cur = s.snapshot()[1]
+        self.assertIsNone(cur["locked_baseline"])           # absence never LOCKS one either
+        self.assertEqual(cur["baseline"], -84)              # the live pad zero is held
 
 
 if __name__ == "__main__":

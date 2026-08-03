@@ -42,7 +42,12 @@ def derive_flights(session_records, ops=None, silence_timeout_s: float = 90):
     # merged, time-sorted event stream; at equal t: open(0) < packet(1) < close(2)
     events = []
     for r in session_records:
-        if r.get("type") == "packet" and "fields" in r and r["fields"].get("St") is not None:
+        # EVERY accepted packet reaches the segmenter, including non-telemetry
+        # frames (bare `CALL` beacons, which carry no `St`). This filter used to
+        # drop them here, which meant the rebuild counted differently from the
+        # live path — the beacon segregation now lives in ONE place,
+        # segmenter.is_telemetry, so the two cannot disagree.
+        if r.get("type") == "packet" and "fields" in r:
             events.append((_epoch(r["received_at"]), 1, "packet", r))
     for o in ops:
         if o.get("op") == "open":

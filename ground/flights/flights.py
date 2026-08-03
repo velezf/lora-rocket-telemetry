@@ -20,8 +20,10 @@ class Flight:
     """One flight in the index.
 
     `stats` holds derived values (peak_alt_ft, duration_s, packets_rx,
-    packets_lost, rssi_min, rssi_max, ...) computed elsewhere — this model
-    just carries the dict.
+    beacons_rx, packets_lost, rssi_min, rssi_max, ...) computed elsewhere —
+    this model just carries the dict. `packets_rx` counts TELEMETRY frames only;
+    non-telemetry frames are segregated into `beacons_rx` (the definition and
+    the policy live in ground/flights/segmenter.py is_telemetry).
     """
 
     flight_id: str

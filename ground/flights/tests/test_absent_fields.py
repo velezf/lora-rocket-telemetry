@@ -16,15 +16,21 @@ B. A frame legitimately missing `ALT`/`SEQ` must contribute nothing to the field
    uint16 gap arithmetic wraps) and a 0 ft peak, and poisoned the pad baseline
    window with a 0 ft sample.
 
-   TWO DIFFERENT FRAMES trip this, and they do NOT reach the same code:
+   TWO DIFFERENT FRAMES trip this:
    - a TELEMETRY frame carrying `St` but missing `ALT`/`SEQ` (legal under ADR
      0001 — every tag is optional) reaches BOTH the live path and the rebuild,
      so both coalesced and both produced the wrong numbers. That is what
      TestLiveAndRebuildAgree drives.
-   - a BARE `CALL` beacon carries no `St` at all, so `derive.py`'s record filter
-     drops it before segmentation: the rebuild was never exposed, and the
-     corruption was LIVE-PATH ONLY. See TestBareCallBeacon, which pins that
-     asymmetry rather than assuming it.
+   - a BARE `CALL` beacon carries no `St` at all. It used to reach only the live
+     path (`derive.py` dropped it before segmentation), so the two paths counted
+     differently. Resolved by policy — see below.
+
+C. THE BEACON POLICY (decided 2026-08-02). Frames that are not telemetry do not
+   participate in flight accounting: a beacon is counted in `beacons_rx`, never
+   in `packets_rx`, and it neither extends `t_end` nor delays the silence
+   timeout. `derive.py` no longer filters beacons out; the segregation lives in
+   one place (segmenter.is_telemetry), so both paths now derive identical stats.
+   TestBeaconsDoNotParticipateInFlightAccounting pins it.
 
 The live path and the offline rebuild must agree — rebuild is what regenerates
 the published index, so a disagreement is a published wrong number.
@@ -174,23 +180,42 @@ code had never once been tested against.
 """
 
 
-def _live_closed(frames):
-    """Flights the LIVE path closed after a long silence (advisory + snapshot)."""
+def _live_closed_at(frames_at, tick_t):
+    """Flights the LIVE path closed by a silence sweep at `tick_t`.
+
+    `frames_at` is [(second, raw), ...] so a test can place frames on a real
+    timeline — which is what the silence-timeout policy needs; the one-per-second
+    helpers below are the common case expressed in terms of this one.
+    """
     with tempfile.TemporaryDirectory() as d:
         snap = Path(d) / "snap.json"
         live = LiveFlights(lambda _ln: None, snap, silence_timeout_s=90)
-        for i, raw in enumerate(frames):
-            live.on_observation(Observation(_ts(i), -60, decode(raw.encode()), float(i)))
-        return live.tick(_ts(200), 200.0)
+        for t, raw in frames_at:
+            live.on_observation(Observation(_ts(t), -60, decode(raw.encode()), float(t)))
+        return live.tick(_ts(tick_t), float(tick_t))
+
+
+def _rebuild_flights_at(frames_at):
+    """Flights the OFFLINE REBUILD derives from the same timeline."""
+    # every frame here is a valid v1 frame, so decode() returns DecodeOk; pyright
+    # doesn't narrow the DecodeOk|DecodeError union through the comprehension.
+    records = [packet_record(_ts(t), -60, decode(raw.encode()))  # pyright: ignore[reportArgumentType]
+               for t, raw in frames_at]
+    return derive_flights(records, silence_timeout_s=90)
+
+
+def _at_one_hz(frames):
+    return list(enumerate(frames))
+
+
+def _live_closed(frames):
+    """Flights the LIVE path closed after a long silence (advisory + snapshot)."""
+    return _live_closed_at(_at_one_hz(frames), 200)
 
 
 def _rebuild_flights(frames):
     """Flights the OFFLINE REBUILD derives — the canonical, published index."""
-    # every frame here is a valid v1 frame, so decode() returns DecodeOk; pyright
-    # doesn't narrow the DecodeOk|DecodeError union through the comprehension.
-    records = [packet_record(_ts(i), -60, decode(raw.encode()))  # pyright: ignore[reportArgumentType]
-               for i, raw in enumerate(frames)]
-    return derive_flights(records, silence_timeout_s=90)
+    return _rebuild_flights_at(_at_one_hz(frames))
 
 
 def _live_stats(frames):
@@ -266,11 +291,13 @@ _BEACON_FRAMES = [
 
 
 class TestBareCallBeacon(unittest.TestCase):
-    """Pins the CURRENT, POST-FIX behaviour of a standalone `CALL` beacon.
+    """A standalone `CALL` beacon under the decided policy.
 
-    These tests assert what the code DOES, not what it should do. The two paths
-    do not treat a bare beacon alike, and that difference is deliberately left
-    unresolved here — see test_live_and_rebuild_disagree_on_a_bare_beacon.
+    THE POLICY: frames that are not telemetry do not participate in flight
+    accounting. This is the foreign-traffic rule (ground/ingest/core.py:12)
+    applied to a second class of non-telemetry frame — counted and segregated,
+    never merged. A beacon is evidence the RADIO is alive, not evidence about
+    the flight.
     """
 
     def test_a_bare_beacon_carries_no_st_alt_or_seq(self):
@@ -280,7 +307,8 @@ class TestBareCallBeacon(unittest.TestCase):
         self.assertEqual(d.unknown, {"CALL": "KC3ZTQ"})        # pyright: ignore[reportAttributeAccessIssue]
 
     def test_a_bare_beacon_alone_opens_no_flight_on_either_path(self):
-        """No `St`, so nothing that could read as ascent."""
+        """No `St`, so nothing that could read as ascent. A station identifying
+        itself must never look like a launch."""
         self.assertEqual(_live_closed([BARE_BEACON, BARE_BEACON]), [])
         self.assertEqual(_rebuild_flights([BARE_BEACON, BARE_BEACON]), [])
 
@@ -294,30 +322,114 @@ class TestBareCallBeacon(unittest.TestCase):
         self.assertEqual(stats["peak_alt_ft"], -74)            # the sled's own Max
         self.assertEqual(stats["packets_lost"], 0)
 
-    def test_the_rebuild_never_sees_a_bare_beacon_at_all(self):
-        """`derive.py` admits only records whose fields carry `St`, so a bare
-        beacon is dropped before segmentation — the rebuild was never exposed to
-        this defect, and its numbers count telemetry frames only."""
-        stats = _rebuild_stats(_BEACON_FRAMES)
-        self.assertEqual(stats["packets_rx"], 2)               # the 2 telemetry frames
-        self.assertEqual(stats["peak_alt_ft"], -74)
-        self.assertEqual(stats["packets_lost"], 0)
 
-    def test_live_and_rebuild_disagree_on_a_bare_beacon(self):
-        """DELIBERATE, UNRESOLVED — do not "fix" this to make it pass differently.
+class TestBeaconsDoNotParticipateInFlightAccounting(unittest.TestCase):
+    """The decided policy, pinned on BOTH paths.
 
-        Whether a beacon counts as a packet OF THE FLIGHT is a product question,
-        not a bug: the live path counts it in packets_rx and lets it extend the
-        flight's t_end (and so hold off the silence timeout), while the rebuild
-        drops it entirely. Resolving it needs a human call. This test exists so
-        the difference is documented and cannot drift silently.
+    Supersedes the pinned live-vs-rebuild disagreement: the live path used to
+    count a bare beacon in `packets_rx` (4 vs the rebuild's 2) and let a trailing
+    beacon extend `t_end` (duration 3.0 vs 2.0). Both are now resolved the same
+    way on both paths, so the two agree field for field.
+    """
+
+    # --- 1. packets_rx excludes beacons; beacons_rx counts them ---------------
+
+    def test_a_beacon_does_not_enter_packets_rx(self):
+        """Beacons carry no `SEQ`, so they cannot participate in loss accounting.
+        In the denominator while absent from the sequence space, they would make
+        the published loss percentage read artificially LOW."""
+        self.assertEqual(_live_stats(_BEACON_FRAMES)["packets_rx"], 2)
+        self.assertEqual(_rebuild_stats(_BEACON_FRAMES)["packets_rx"], 2)
+
+    def test_a_beacon_is_visible_as_beacons_rx_not_discarded(self):
+        self.assertEqual(_live_stats(_BEACON_FRAMES)["beacons_rx"], 2)
+        self.assertEqual(_rebuild_stats(_BEACON_FRAMES)["beacons_rx"], 2)
+
+    def test_a_flight_with_no_beacons_reports_zero_not_absent(self):
+        """`beacons_rx` is always present — a consumer never has to distinguish
+        "no beacons" from "this index predates the field"."""
+        self.assertEqual(_live_stats(_FRAMES)["beacons_rx"], 0)
+        self.assertEqual(_rebuild_stats(_FRAMES)["beacons_rx"], 0)
+
+    def test_a_call_riding_on_a_telemetry_frame_is_still_telemetry(self):
+        """The discriminator is the ABSENCE OF `St`, not the presence of `CALL`.
+        `_FRAMES` carries two `St`-bearing frames that also carry `CALL`; those
+        are telemetry and must stay in packets_rx. Of the three in-flight frames
+        (boost + `St:2 CALL` + `St:2` telemetry) one is a CALL-rider, so a
+        presence-of-CALL discriminator would report 2 here. GREEN before and
+        after the policy — a regression guard on the discriminator, not a
+        behaviour change."""
+        self.assertEqual(_rebuild_stats(_FRAMES)["packets_rx"], 3)
+        self.assertEqual(_live_stats(_FRAMES)["packets_rx"], 3)
+
+    # --- 2. beacons do not extend t_end / delay the silence timeout -----------
+
+    def test_a_trailing_beacon_does_not_extend_t_end(self):
+        """A flight ends at its last TELEMETRY frame."""
+        for stats in (_live_stats(_BEACON_FRAMES), _rebuild_stats(_BEACON_FRAMES)):
+            self.assertEqual(stats["duration_s"], 2.0)
+
+    def test_a_trailing_beacon_does_not_move_the_flights_t_end_timestamp(self):
+        closed = _live_closed(_BEACON_FRAMES)
+        self.assertEqual(closed[0].t_end, _ts(2))              # not _ts(3), the beacon
+        self.assertEqual(_rebuild_flights(_BEACON_FRAMES)[0].t_end, _ts(2))
+
+    def test_a_beacon_does_not_delay_the_silence_timeout(self):
+        """THE FAILURE MODE THIS PREVENTS: a landed rocket beaconing every 60 s
+        would never close — it would run until the battery died, and duration_s
+        would become the interval between ID transmissions rather than the flight
+        duration. The flight must not be defined by its callsign.
+
+        Telemetry stops at t=1; beacons continue at 60/120/180. With a 90 s
+        timeout the flight must close on the silence after t=1, not after t=180.
         """
-        live, rebuild = _live_stats(_BEACON_FRAMES), _rebuild_stats(_BEACON_FRAMES)
-        self.assertEqual(live["packets_rx"], 4)                # beacons counted
-        self.assertEqual(rebuild["packets_rx"], 2)             # beacons dropped
-        self.assertEqual(live["duration_s"], 3.0)              # trailing beacon extends t_end
-        self.assertEqual(rebuild["duration_s"], 2.0)           # ends at the last telemetry frame
-        self.assertNotEqual(live, rebuild)                     # the published index differs
+        timeline = [(0, "V:1 SYS:7 SRC:1 SEQ:1 St:1 ALT:-80ft Max:-80ft"),
+                    (1, "V:1 SYS:7 SRC:1 SEQ:2 St:2 ALT:-78ft Max:-74ft"),
+                    (60, BARE_BEACON), (120, BARE_BEACON), (180, BARE_BEACON)]
+
+        rebuilt = _rebuild_flights_at(timeline)
+        self.assertEqual(len(rebuilt), 1)
+        self.assertEqual(rebuilt[0].stats["duration_s"], 1.0)  # not 180.0
+        self.assertEqual(rebuilt[0].t_end, _ts(1))
+        # the t=60 beacon arrived while the flight was still open, so it counts;
+        # the 120/180 ones postdate the close and belong to no flight.
+        self.assertEqual(rebuilt[0].stats["beacons_rx"], 1)
+
+        live = _live_closed_at(timeline[:3], 95)               # sweep at t=95
+        self.assertEqual(len(live), 1)                         # the beacon at t=60
+        self.assertEqual(live[0].stats["duration_s"], 1.0)     # did not hold it open
+        self.assertEqual(live[0].stats["beacons_rx"], 1)
+
+    # --- 3. beacons contribute to nothing else -------------------------------
+
+    def test_a_beacon_contributes_no_rssi_to_the_flights_link_stats(self):
+        """RSSI min/max describe the link to the VEHICLE during the flight. A
+        beacon's RSSI is a fact about the radio, and merging it would widen the
+        published spread with a sample the flight never produced."""
+        timeline = [(0, "V:1 SYS:7 SRC:1 SEQ:1 St:1 ALT:-80ft Max:-80ft"),
+                    (1, "V:1 SYS:7 SRC:1 SEQ:2 St:2 ALT:-78ft Max:-74ft")]
+        with_beacon = _rebuild_flights_at(timeline + [(2, BARE_BEACON)])[0].stats
+        without = _rebuild_flights_at(timeline)[0].stats
+        self.assertEqual(with_beacon["rssi_min"], without["rssi_min"])
+        self.assertEqual(with_beacon["rssi_max"], without["rssi_max"])
+
+    def test_beacons_before_a_flight_opens_belong_to_no_flight(self):
+        """A beacon on a quiet pad is not retro-counted into the flight that
+        opens afterwards — it was not part of it."""
+        timeline = [(0, BARE_BEACON), (1, BARE_BEACON),
+                    (2, "V:1 SYS:7 SRC:1 SEQ:1 St:1 ALT:-80ft Max:-80ft")]
+        self.assertEqual(_rebuild_flights_at(timeline)[0].stats["beacons_rx"], 0)
+        self.assertEqual(_live_closed_at(timeline, 200)[0].stats["beacons_rx"], 0)
+
+    # --- 4. and the two paths now agree --------------------------------------
+
+    def test_live_and_rebuild_agree_on_a_bare_beacon(self):
+        """RESOLVES the previously-pinned disagreement. The rebuild no longer
+        drops beacons before segmentation and the live path no longer merges
+        them: segregation happens in ONE place (the segmenter), so both paths
+        derive identical stats — the published index and the live advisory
+        events can no longer differ."""
+        self.assertEqual(_live_stats(_BEACON_FRAMES), _rebuild_stats(_BEACON_FRAMES))
 
 
 if __name__ == "__main__":

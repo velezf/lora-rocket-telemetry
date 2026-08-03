@@ -15,10 +15,14 @@ Flight IDs come from ground.flights.flights.next_flight_id (stable YYYY-MM-DD-Fn
 assigned at open and never reused.
 
 ABSENT IS NOT ZERO. `alt`, `seq` and `max_alt` are all optional: a frame that
-omits one (a CALL beacon) is still a received packet, but contributes nothing to
-the stat it cannot supply. 0 is a legal value for every one of them, so a caller
-must never coalesce None to 0 on the way in — that fabricated a 65535-packet
-loss (the uint16 gap arithmetic wraps) and a 0 ft peak.
+omits one is still a received packet, but contributes nothing to the stat it
+cannot supply. 0 is a legal value for every one of them, so a caller must never
+coalesce None to 0 on the way in — that fabricated a 65535-packet loss (the
+uint16 gap arithmetic wraps) and a 0 ft peak.
+
+NOT EVERY FRAME IS TELEMETRY. A frame with no `St` is a bare Part-97 `CALL`
+beacon; it is counted in `beacons_rx` and takes no other part in the flight.
+`is_telemetry` below is the single definition and carries the rationale.
 """
 from ground.flights.flights import Flight, next_flight_id
 from ground.flights.baseline import pad_baseline, WINDOW, EXCLUDE_TAIL
@@ -63,6 +67,34 @@ def max_is_meaningful(st) -> bool:
     return st is not None and st != ST_PAD
 
 
+def is_telemetry(st) -> bool:
+    """May this frame participate in flight accounting?
+
+    THE SINGLE DEFINITION — the one place that decides what is telemetry. The
+    discriminator is the ABSENCE OF `St`, never the presence of `CALL`: a `CALL`
+    riding on a complete telemetry frame is telemetry, and a bare beacon carries
+    no `St` at all.
+
+    POLICY: frames that are not telemetry do not participate in flight
+    accounting. This is the foreign-traffic rule of `ground/ingest/core.py:12`
+    applied to a second class of non-telemetry frame — counted and segregated,
+    never merged. A Part-97 `CALL` beacon is the station identifying itself: it
+    is evidence the RADIO is alive, not evidence about the flight.
+
+    Two consequences, both implemented in `observe` below:
+    - a beacon is counted in `beacons_rx`, never in `packets_rx`. It carries no
+      `SEQ`, so it cannot participate in loss accounting; in the denominator
+      while absent from the sequence space it would make the published loss
+      percentage read artificially LOW.
+    - a beacon does not extend `t_end` and so does not hold off the silence
+      timeout. The 90 s rule detects "the vehicle stopped sending telemetry"; if
+      beacons held a flight open, a landed rocket beaconing every 60 s would run
+      until the battery died and `duration_s` would become the interval between
+      ID transmissions. The flight must not be defined by its callsign.
+    """
+    return st is not None
+
+
 def _peak_candidates(st, alt, max_alt):
     """Altitudes from one frame that may raise a flight's peak."""
     vals = [] if alt is None else [alt]
@@ -101,7 +133,7 @@ class FlightSegmenter:
             "flight_id": fid, "src": src,
             "t_start_iso": received_at, "t_start": t,
             "t_end_iso": received_at, "t_end": t,
-            "peak_alt": peak, "packets": packets,
+            "peak_alt": peak, "packets": packets, "beacons": 0,
             "rssi_min": rssi, "rssi_max": rssi,
             "last_seq": seq, "gaps": 0,
             "baseline_ft": base_ft, "baseline_n": base_n,
@@ -118,9 +150,19 @@ class FlightSegmenter:
 
         `alt`, `seq` and `max_alt` may be None — the frame simply didn't carry
         them. Absent fields are skipped, never read as 0 (see the module docstring).
+
+        An absent `st` means the frame is NOT TELEMETRY (a bare `CALL` beacon):
+        it is counted in `beacons_rx` and touches nothing else — see
+        `is_telemetry` for the policy and why. This is the only segregation
+        point, so the live path and the offline rebuild cannot disagree.
         """
-        peak_in = _peak_candidates(st, alt, max_alt)
         fl = self._open.get(src)
+        if not is_telemetry(st):
+            if fl is not None:
+                fl["beacons"] += 1     # visible, but out of the flight's accounting
+            return None                # no t_end, no packets_rx, no rssi, no open
+
+        peak_in = _peak_candidates(st, alt, max_alt)
         if fl is None:
             if st == ST_ASCENT:
                 peak = max(peak_in) if peak_in else None
@@ -169,7 +211,8 @@ class FlightSegmenter:
             stats={
                 "peak_alt_ft": fl["peak_alt"],
                 "duration_s": round(fl["t_end"] - fl["t_start"], 3),
-                "packets_rx": fl["packets"],
+                "packets_rx": fl["packets"],            # TELEMETRY frames only
+                "beacons_rx": fl["beacons"],            # non-telemetry, segregated
                 "packets_lost": fl["gaps"],
                 "rssi_min": fl["rssi_min"],
                 "rssi_max": fl["rssi_max"],

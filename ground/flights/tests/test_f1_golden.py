@@ -52,6 +52,15 @@ class TestF1Golden(unittest.TestCase):
         self.assertEqual(f.stats, {
             "peak_alt_ft": -74, "duration_s": 87.556,
             "packets_rx": 75, "packets_lost": 1,          # one real SEQ gap during the swing
+            # INTERFACE CHANGE, 2026-08-02: `beacons_rx` was ADDED to the stats
+            # dict when non-telemetry frames were segregated out of flight
+            # accounting (see ground/flights/segmenter.py is_telemetry). F1 flew
+            # before the sled emitted `CALL`, so it contains no beacons and every
+            # OTHER number below is byte-identical to the pre-change golden — the
+            # new key is the whole of the diff. The published flights.json is
+            # unaffected: ground/publish/data.py builds its own explicit summary
+            # dict and was deliberately not touched.
+            "beacons_rx": 0,
             "rssi_min": -38, "rssi_max": -14,
             # v2 AGL zero, recomputed retrospectively from the 19 quiet pre-boost pad
             # packets (SEQ 0-18, ALT -83..-85): peak AGL = -74 - (-84) = 10 ft (noise).

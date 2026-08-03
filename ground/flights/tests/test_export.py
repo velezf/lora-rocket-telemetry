@@ -56,6 +56,20 @@ class TestExport(unittest.TestCase):
         rows = flight_rows([rec], self.flight)
         self.assertIsNone(rows[0]["ALT"])
 
+    def test_a_bare_call_beacon_is_not_a_row_in_the_flight_trace(self):
+        """Same policy as the index: frames that are not telemetry do not
+        participate in flight accounting (ground/flights/segmenter.py
+        is_telemetry). A bare `CALL` beacon inside the flight's window has no
+        `St`/`ALT`/`SEQ`, so it would export as a row of nulls — and the CSV is
+        the per-packet trace of the very flight whose `packets_rx` excludes it.
+        A trace with more rows than `packets_rx` is a published artifact that
+        contradicts its own summary."""
+        beacon = {"type": "packet", "received_at": "2026-07-08T00:00:01Z", "rssi": -60,
+                  "sys": 7, "src": 1, "seq": None, "fields": {"SYS": 7, "SRC": 1},
+                  "unknown": {"CALL": "KC3ZTQ"}, "raw": "V:1 SYS:7 SRC:1 CALL:KC3ZTQ"}
+        rows = flight_rows(self.records + [beacon], self.flight)
+        self.assertEqual([r["SEQ"] for r in rows], [1, 2, 3])   # no null-only row
+
     def test_decode_error_packets_excluded(self):
         err = {"type": "packet", "received_at": "2026-07-08T00:00:01Z", "rssi": -60,
                "error": "malformed-token", "raw": "V:1 GARBAGE"}  # no src/fields

@@ -17,6 +17,67 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
+## FLIGHT DAY 2026-08-06 — what was flown, and what is waiting
+
+**FLYING: `03d70aa`** — 20 Hz-target sampling (17.00 Hz achieved), TX unchanged at 1 Hz,
+confirmed apogee and confirmed launch. **Bench-verified clean against all seven abort checks**
+before departure: `SEQ 193→307` with 0 discontinuities, 0.0% loss over 115 packets, session
+opening, panel and OLED normal, baseline locked at −83 ft.
+
+**MEASURED, NOT CLAIMED — the sample rate is 17.00 Hz, not 20.** Every doc that says 20 means
+this number. Reason: BMP390 conversion is ~25 ms at the configured oversampling, of which
+**16.3 ms is 8x TEMPERATURE oversampling that altitude does not use**, plus the ADXL I2C read
+each tick ≈ 59 ms per sample. It is comfortably above the 8 Hz abort floor and past the 5 Hz
+knee where the benefit flattens: the harness measures 20 Hz at 33.8 ft of apogee-detection loss
+versus 10 Hz at 36.2 ft, so 17 Hz is indistinguishable from the target.
+
+**EVIDENCE, not a note: the launch dwell held through a flash, a CPU reset and USB handling.**
+`St` across the entire 115-packet bench run was `[0]` only. That is the first empirical proof
+the dwell does what it was added for — and it happened by accident on the bench rather than by
+design, which is the strongest kind. (Baseline locking at −83 ft against F1's −84 is a pleasant
+barometer sanity signal; do not over-read it, pressure varies day to day.)
+
+### Waiting for real flight data
+- **The OLED trend strip becomes DECIDABLE.** Criterion already recorded: rising ramp through
+  boost and coast, flatten at apogee, shallow steady decline under chute, autoscaled. A flat
+  smear during descent means the autoscale is not earning its 10 px and the strip should be cut.
+- **2.2 hotspot** closes if the dashboard loaded from the phone at the field.
+
+### Increment 2 (`worktree-agent-a7e6e458b1b6637a5`, `9759989`) — NOT FLOWN, NOT COMPLETE
+Per-axis accel as additive v1 tags `Ax`/`Ay`/`Az`. **DO NOT MERGE AS-IS — it has a DEFECT, not
+a missing refinement:** with 1 Hz TX over 17 Hz sampling the transmitted axes are a random
+1-in-17 snapshot, and a boost is 1-2 s. So the tags capture one or two arbitrary samples that
+may be nowhere near peak — **close to worthless for the one number they exist to provide**, and
+Epic 5's reference dataset is their whole justification. **The fix is PEAK-HOLD within the TX
+window** (track max |a| across the window, transmit those axes, reset each TX), which turns a
+snapshot into a measurement. ~30 min including the `main.cpp` conflict and a mandatory re-bench.
+**Its `main.cpp` WILL conflict** — it branched from `ca99691`, before the sample/TX split; the
+5-line re-apply is preserved below.
+
+**What increment 2 already banked, and keeps regardless:**
+- **A truncation defect caught BY MEASUREMENT BEFORE FLASHING, not after a flight.** With the
+  new tags the worst case (ADXL375 clipping ±200 g on all three axes) is **143 bytes against a
+  128-byte buffer** — bounded, never an overflow, but trailing tags **silently lost**, surfacing
+  only on a hard lateral hit, i.e. exactly when the data matters most. `PACKET_BUF_LEN = 160`
+  now lives once in `packet.h` with a regression test. *(The CURRENTLY FLASHED build is safe:
+  measured worst case 107 bytes against 128.)*
+- **The unknown-tag gate, verified through the real decode+ingest path** — additive tags move no
+  `errors`, `anomalies` or `foreign` counter. Two of its tests are deliberately anti-hollow: one
+  asserts the frame is still fully ACCEPTED (counters would also stay flat if it were dropped),
+  and one proves the gate CAN fail by putting a foreign `SYS` on the same frame.
+
+### ⚠ "UNKNOWN ⇒ INERT" IS NOT A GENERAL INVARIANT
+**`CALL` is an unknown tag that ingest DOES read** — the Part-97 ID audit trail, and it can move
+`id_mismatches`. So the gate above holds for `Ax`/`Ay`/`Az` but **one tag name is already
+special-cased**. Anyone adding a tag needs to know this: it reads as a rule right up until it
+bites.
+
+### Backlog from today (not now)
+- **Drop the BMP390 temperature oversampling from 8x.** It costs 16.3 ms of a ~25 ms conversion
+  and **altitude does not use temperature at all** — it feeds only the `T:` telemetry tag. This
+  buys back most of the sample-rate budget and is close to free.
+- **Peak-hold for the accel axes** — see increment 2 above. Not a refinement; the defect.
+
 ## NEXT SESSION — start here: EPIC 6, PHASE 0
 
 **Epic 4 CLOSED. The OLED redesign is MERGED. `main` is clean, three copies identical, single
@@ -741,6 +802,7 @@ panel-covered until it comes off this list.**
 | Signal | Designed behaviour | Why it is INERT today | To activate |
 |---|---|---|---|
 | **RED — write-failing leg** | RED SOLID when the session log stops persisting (disk-full, failed append) | The pure core honours `write_ok=False` (tested), but the ingest publisher **hardcodes `write_ok=True`** — the leg is unreachable end-to-end | Queue-backed writer exposes a health flag → `state_snapshot(write_ok=...)` |
+| **`B_RF` (panel position 1) — ENTIRELY** | RF trouble: foreign traffic (slow) / CRC climbing (fast) | **The signal can never fire.** `state_snapshot()` in `ground/ingest/service.py` publishes only `ts`, `last_rx_ts`, `flight_open` — `crc_climbing` and `rf_foreign` are read by the supervisor but **nothing ever sets them**. Position 1 is permanently dark. Found 2026-08-06 while writing the field checklist; the register had a gap | Publish RF counters in the heartbeat snapshot |
 | **B_CLOCK — attested case** | SLOW blink = operator-attested clock, distinct from SOLID = RTC-restored | The `/run` marker is an **empty touch file**, so the supervisor cannot tell restore from attest; `read_provenance()` can only return `rtc`/`unknown` and attested reads as RTC | `restore_clock`/`attest_clock` write the *reason* into the marker; supervisor reads it |
 
 **Consequences to state plainly:** RED does **not** cover disk-full, and B_CLOCK does **not**

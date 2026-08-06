@@ -18,7 +18,7 @@ Roadmap for the Apogee Zephyr telemetry system: replatform the firmware, stand u
 
 ## Dependency order
 
-Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and can run in parallel. Epic 3 needs Epic 1. Epic 4 needs Epic 2 (Pi + native RX) and Epic 3's packet contract (3.2–3.4). Epic 5 builds on 3 and 4. Epic 6 (relay deployment) is safety-critical and depends on Epic 3's apogee detection (3.6). Epics 7 (lander) and 8 (handheld) are additional nodes on the shared grammar. Core loop to a first flight: 1 → 2 → 3 → 4; Epics 7 and 8 are optional to that first flight.
+Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and can run in parallel. Epic 3 needs Epic 1. Epic 4 needs Epic 2 (Pi + native RX) and Epic 3's packet contract (3.2–3.4). Epic 5 builds on 3 and 4. Epic 6 (telemetry quality) refines Epic 3's detectors (3.6) and Epic 4's record; **it no longer gates flying and is no longer safety-critical** — deployment is COTS or motor ejection on every vehicle (see Epic 6). Epics 7 (lander) and 8 (handheld) are additional nodes on the shared grammar. Core loop to a first flight: 1 → 2 → 3 → 4; Epics 7 and 8 are optional to that first flight.
 
 ## Build notes (operational gotchas)
 
@@ -44,7 +44,7 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 - Feather M0 RFM96 *[have]* + wire-whip antenna *[have]*
 - BMP390 + ADXL375 *[have]*
 - LSM6DSOX + LIS3MDL 9-DoF *[have]*
-- 2× STEMMA relays for deployment *[have]*
+- 2× STEMMA relays *[have — **unassigned since 2026-08-06**; bought for deployment, which is dissolved (see Epic 6). Not committed to any use.]*
 
 **Lander (`SRC:2`)**
 - KB2040 *[have]* + second RFM96W breakout w/ soldered quarter-wave wire antenna *[have, ready]*
@@ -116,15 +116,25 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 - **5.3** — Extend v1 with additive tags (e.g. `Roll`, `Spin`)
 - **5.4** — Decoder + dashboard + OLED updates to surface the new fields
 
-## Epic 6 — Relay deployment  *(safety-critical)*
+## Epic 6 — Telemetry quality  *(record integrity + multi-node readiness)*
 
-*Goal: the rocket deploys its own ejection charges via onboard relays — armed by a physical pad pin, fired autonomously, engineered to fail safe and ground-tested to your range's bar.*
+*Goal: every packet the ground records is trustworthy and attributable — the detectors sample fast enough to be right, one noisy sample cannot corrupt the flight state for a whole ascent, a flight closes itself on landing, and every transmitter says who it is.*
 
-- **6.1** — Pyro hardware: fire path through the relay's **normally-open** contact (de-energized = no fire, so reset / power loss fails open); charges on a **separate battery rail** broken by a **physical pad-safety pin**; an **e-match continuity** sense line. Confirm the relay's contact rating comfortably exceeds the e-match's all-fire current
-- **6.2** — Deploy logic (firmware): fires autonomously on the rocket's own apogee detection; the **physical arm pin gates** the fire logic (disarmed → armed → apogee → fire), host-tested as a pure state machine (TDD); fail-open on reset / power loss
-- **6.3** — Ground testing: bench-fire the relays into a test load (no live charge); ground ejection test to size charges + confirm reliable fire; verify nothing fires unarmed and that reset / power-cut fails safe
+**Renamed 2026-08-06. Epic 6 was "Relay deployment (safety-critical)"; self-built deployment is DISSOLVED** — RadioRocket flies motor ejection with a nose-cone ebay and shear pins, KatanaJR flies an Altus Metrum mini, the High Power Zephyr has a nose-cone ebay. No vehicle needs it, so the requirement behind that epic never existed. The reasoning, and the pyro reference material worth keeping, are archived in [`epic6-plan.md`](epic6-plan.md) §A — **archived, not deferred.**
 
-*(Open call — the last one left: one deployment event vs. apogee + main, decided at build time. The second commits your second relay to a main charge.)*
+**The number stays 6 so existing citations still land; the sub-numbers do not.** Old 6.1 (pyro hardware) / 6.2 (deploy logic) / 6.3 (ground testing) refer to the archived plan and nothing else. The items below are the work that actually survived, renumbered from 6.1.
+
+**Consequence to keep visible: this removes the only safety-critical subsystem from the project. Everything remaining is observability.** Deployment belongs to COTS avionics or to the motor; this system is the ground segment and the experimental node. Nothing here is a safety claim, and no item below may be justified as one.
+
+- **6.1** — **Sample/TX decoupling** — sample the detectors on a fast tick, transmit on a 1 Hz tick. **✅ LANDED 2026-08-06** on `feat/telemetry-quality` (`0592b95`): 50 ms sample tick / 1000 ms TX tick, and a failed `bmp.performReading()` now skips **that sample only** instead of returning from the whole loop and costing a packet. **The wire is unchanged** — TX stays at exactly 1 Hz, packet format untouched, so ADR 0001 needs no bump and the e2e golden fixture stays valid. The firmware prints its own achieved sample rate every 5 s, so a BMP390 shortfall is measured on the bench rather than assumed. *Not yet flashed — bench verification pending.*
+- **6.2** — **Confirmed apogee, and the harness that measures it** — **✅ LANDED 2026-08-06** on `feat/telemetry-quality` (`e956e75`): `lib/profile` (synthetic flight profile with analytic ground truth + a harness that runs any detector at any rate) and `lib/apogee/apogee_confirm.h` (20 ft hysteresis below the running max **and** 300 ms continuous dwell). **This is a DATA-QUALITY fix, not a safety fix**: `apogee::Detector` declares apogee on the first sample not strictly greater than the running max and latches permanently, so one noisy boost sample sets `St:2` for the rest of the flight and **every subsequent packet carries a wrong flight state — a corruption no ground-side derivation can recover, because the truth was never transmitted.** Constants are expressed in **time, not sample counts**, so a slower achieved rate degrades precision instead of silently redefining the criterion. The harness immediately corrected a 3× arithmetic error in the plan's own latency estimate (measured 77.9 ft at 1 Hz vs. 33.8 ft at 20 Hz, not the claimed 257/27) and showed **most of the benefit is won by 5 Hz** — the latch fix does the real work, at any rate.
+- **6.3** — **`St:3` = landed** — a landed flight-state code so the ground can auto-close a flight (today: 90 s silence + manual only; there is no landed signal at all)
+- **6.4** — **Per-unit `SRC` build config** (`-DSRC_ID` per device env) — never a shared constant; two sleds built from one repo must not both claim `SRC:1`
+- **6.5** — **±10 % TX-interval jitter** — anti-lockstep so simultaneous birds do not collide every second
+- **6.6** — **`CALL` beaconing (Part 97 station ID)** — `CALL:<callsign>` at TX start / ≤9.5 min / graceful shutdown, per-unit `-DCALLSIGN`. The ground side (decoder fixture, ingest `id` audit, CALL↔SYS binding) is already merged; the lander (Epic 7) inherits the same ID-timer obligation
+- **6.7** — **`BAT` go/no-go tag** — the derived launch-readiness indicator for the dashboard/OLED (raw volts already ride `Batt:`)
+
+*Each of 6.3–6.7 is additive to ADR 0001 and re-runs the e2e gate. 6.4 and 6.5 stop being optional the moment a second transmitter exists — see Epic 7's closure bar.*
 
 ## Epic 7 — Deployable lander payload  *(`SRC:2`)*
 
@@ -151,6 +161,6 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 
 ## Parking lot (captured, out of core scope)
 
-- **Recovery aids** — a buzzer / strobe finder for the last 50 m, complementing the planned LightAPRS GPS. If both relays go to deployment, a recovery buzzer needs its own switch (a third relay or a low-side MOSFET).
+- **Recovery aids** — a buzzer / strobe finder for the last 50 m, complementing the planned LightAPRS GPS. *(The old contention here — "if both relays go to deployment, a buzzer needs a third switch" — is void as of 2026-08-06: deployment is dissolved and both STEMMA relays are unassigned.)*
 - **Additional TX nodes** — the lander (Epic 7) already exercises the `SYS` / `SRC` addressing; the freed ground-RX Feather M0 is now a candidate host for a third node or a backup RX.
 - **Lander GPS** — a PA1010D STEMMA QT for real position instead of RSSI-only; deferred since LightAPRS covers the rocket's position.

@@ -28,7 +28,7 @@
 #include <Adafruit_ADXL375.h>
 
 #include <packet.h>
-#include <launch.h>
+#include <launch_confirm.h>
 #include <apogee_confirm.h>
 #include <convert.h>
 
@@ -46,7 +46,12 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 Adafruit_BMP3XX bmp;
 Adafruit_ADXL375 adxl(0x53, &Wire);
 
-LaunchDetector launchDet;        // default 3.0 g threshold
+// Confirmed launch: threshold + 100 ms dwell. LaunchDetector latched in-flight on a SINGLE
+// sample over 3 g, and 20 Hz sampling makes that materially worse — at 50 ms ticks ANY
+// transient wider than one tick is caught, and a hand-knock is 10-100 ms. A real launch is
+// SUSTAINED, so a short dwell discriminates almost perfectly; at 1 Hz it degrades to the old
+// single-sample behaviour rather than breaking.
+launch::Confirm launchDet(3.0f, 100);        // default 3.0 g threshold
 // Confirmed apogee: hysteresis + dwell, so one noisy boost sample cannot latch St:2 for
 // the whole flight and corrupt the flight record. Constants are in TIME, not samples.
 apogee::Confirm apogeeDet(20.0f, 300);
@@ -138,7 +143,7 @@ void loop() {
     adxl.getEvent(&e);
     lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
 
-    if (launchDet.update(lastG)) launchTime = now;
+    if (launchDet.update(lastG, now)) launchTime = now;
     if (launchDet.is_in_flight()) {
       if (haveSample) apogeeDet.update(lastAltFt, now);
       if (lastG > peakG) peakG = lastG;

@@ -28,8 +28,8 @@
 #include <Adafruit_ADXL375.h>
 
 #include <packet.h>
-#include <launch.h>
-#include <apogee.h>
+#include <launch_confirm.h>
+#include <apogee_confirm.h>
 #include <convert.h>
 
 // -------------------- Pins / radio --------------------
@@ -46,8 +46,15 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 Adafruit_BMP3XX bmp;
 Adafruit_ADXL375 adxl(0x53, &Wire);
 
-LaunchDetector launchDet;        // default 3.0 g threshold
-apogee::Detector apogeeDet;
+// Confirmed launch: threshold + 100 ms dwell. LaunchDetector latched in-flight on a SINGLE
+// sample over 3 g, and 20 Hz sampling makes that materially worse — at 50 ms ticks ANY
+// transient wider than one tick is caught, and a hand-knock is 10-100 ms. A real launch is
+// SUSTAINED, so a short dwell discriminates almost perfectly; at 1 Hz it degrades to the old
+// single-sample behaviour rather than breaking.
+launch::Confirm launchDet(3.0f, 100);        // default 3.0 g threshold
+// Confirmed apogee: hysteresis + dwell, so one noisy boost sample cannot latch St:2 for
+// the whole flight and corrupt the flight record. Constants are in TIME, not samples.
+apogee::Confirm apogeeDet(20.0f, 300);
 
 float groundPressure = 1013.25f;  // hPa, calibrated at boot
 float peakG = 0.0f;
@@ -86,44 +93,97 @@ void setup() {
   Serial.println("Sled TX ready (ADR v1)");
 }
 
+// SAMPLE FAST, TRANSMIT SLOW (6.0a).
+//
+// Sampling and transmitting used to be the SAME loop, gated by delay(1000) — so the
+// detectors saw one sample per second, which is why the 2026-07-08 shake test's 2.2 g jerk
+// fell between samples and never tripped launch detection.
+//
+// THE WIRE IS UNCHANGED. TX stays at exactly 1 Hz and the packet format is untouched, so the
+// ground station needs no change, ADR 0001 needs no bump, and the e2e golden fixture stays
+// valid. Only the DETECTORS and the onboard running Max see the faster rate.
+//
+// Measured on the synthetic profile (firmware/lib/profile, 6.0b): confirmed-apogee latency
+// costs 77.9 ft of altitude at 1 Hz versus 33.8 ft at 20 Hz. Most of that is won by 5 Hz
+// (41.2 ft) — so if the BMP390 cannot sustain 20 Hz at the configured oversampling, a lower
+// achieved rate degrades this gracefully rather than invalidating it.
+static const unsigned long SAMPLE_MS = 50;    // 20 Hz target; ACHIEVED rate is reported below
+static const unsigned long TX_MS     = 1000;  // 1 Hz — DO NOT CHANGE without an ADR review
+
+static unsigned long lastSampleMs = 0;
+static unsigned long lastTxMs     = 0;
+static float lastAltFt = 0.0f, lastTempC = 0.0f, lastG = 0.0f;
+static bool  haveSample = false;
+
+// Achieved-rate self-report: the BMP390's real throughput at our oversampling is a MEASURED
+// property, not a chosen one. Counting and printing it means the number arrives with the
+// build instead of gating it, and a shortfall is visible on the bench rather than inferred.
+static unsigned long sampleCount = 0, sampleWindowStart = 0, baroFailures = 0;
+
 void loop() {
-  if (!bmp.performReading()) { Serial.println("BMP read failed"); return; }
-  float altitudeFt = pressure_to_altitude_ft(bmp.pressure / 100.0f, groundPressure);
-  float tempC = bmp.temperature;
+  const unsigned long now = millis();
 
-  sensors_event_t e;
-  adxl.getEvent(&e);
-  float g = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
+  // ---- SAMPLE (fast) ----
+  if (now - lastSampleMs >= SAMPLE_MS) {
+    lastSampleMs = now;
+    // A failed barometer read skips THIS SAMPLE ONLY. It used to `return` from the whole
+    // loop, which also skipped the transmission — one bad I2C read cost a packet, and at
+    // 20 Hz there are 20x more chances to hit it. One failure path must not take out an
+    // unrelated responsibility.
+    if (bmp.performReading()) {
+      lastAltFt  = pressure_to_altitude_ft(bmp.pressure / 100.0f, groundPressure);
+      lastTempC  = bmp.temperature;
+      haveSample = true;
+      sampleCount++;
+    } else {
+      baroFailures++;
+    }
 
-  // Flight state from the pure detectors.
-  if (launchDet.update(g)) launchTime = millis();
-  bool inFlight = launchDet.is_in_flight();
-  if (inFlight) {
-    apogeeDet.update(altitudeFt);
-    if (g > peakG) peakG = g;
+    sensors_event_t e;
+    adxl.getEvent(&e);
+    lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
+
+    if (launchDet.update(lastG, now)) launchTime = now;
+    if (launchDet.is_in_flight()) {
+      if (haveSample) apogeeDet.update(lastAltFt, now);
+      if (lastG > peakG) peakG = lastG;
+    }
   }
-  bool descending = apogeeDet.is_descending();
 
-  Packet p;
-  p.sys    = SYS_ID;
-  p.src    = SRC_ID;
-  p.seq    = seq;
-  p.state  = !inFlight ? 0u : (descending ? 2u : 1u);
-  p.alt_ft = (int)lroundf(altitudeFt);
-  p.max_ft = (int)lroundf(apogeeDet.max_altitude());   // 0 until first in-flight sample
-  p.g      = g;
-  p.pg     = peakG;
-  p.temp_c = tempC;
-  p.batt_v = readBatteryVoltage();
-  p.met_s  = inFlight ? (unsigned int)((millis() - launchTime) / 1000UL) : 0u;
+  // ---- TRANSMIT (slow, unchanged) ----
+  if (now - lastTxMs >= TX_MS) {
+    lastTxMs = now;
+    const bool inFlight   = launchDet.is_in_flight();
+    const bool descending = apogeeDet.is_descending();
 
-  char msg[128];
-  size_t n = encode_packet(p, msg, sizeof(msg));
+    Packet p;
+    p.sys    = SYS_ID;
+    p.src    = SRC_ID;
+    p.seq    = seq;
+    p.state  = !inFlight ? 0u : (descending ? 2u : 1u);
+    p.alt_ft = (int)lroundf(lastAltFt);
+    p.max_ft = (int)lroundf(apogeeDet.max_altitude());   // 0 until first in-flight sample
+    p.g      = lastG;
+    p.pg     = peakG;
+    p.temp_c = lastTempC;
+    p.batt_v = readBatteryVoltage();
+    p.met_s  = inFlight ? (unsigned int)((now - launchTime) / 1000UL) : 0u;
 
-  Serial.print("TX: "); Serial.println(msg);
-  rf95.send((uint8_t*)msg, n);
-  rf95.waitPacketSent();
+    char msg[128];
+    size_t n = encode_packet(p, msg, sizeof(msg));
 
-  seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR
-  delay(1000);
+    Serial.print("TX: "); Serial.println(msg);
+    rf95.send((uint8_t*)msg, n);
+    rf95.waitPacketSent();
+
+    seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR
+
+    // Achieved sample rate over the last window — the measurement, printed with the build.
+    if (sampleWindowStart == 0) sampleWindowStart = now;
+    else if (now - sampleWindowStart >= 5000UL) {
+      Serial.print("RATE: "); Serial.print(sampleCount * 1000.0f / (now - sampleWindowStart));
+      Serial.print(" Hz achieved, baro failures "); Serial.println(baroFailures);
+      sampleCount = 0; sampleWindowStart = now;
+    }
+  }
 }

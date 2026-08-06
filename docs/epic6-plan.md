@@ -1,3 +1,135 @@
+# ARCHIVED REFERENCE — self-built relay deployment is NOT BEING BUILT
+
+> **STATUS: ARCHIVED 2026-08-06. This is not an active plan and must not be read as one.**
+>
+> Nothing in this document is scheduled, assigned, in progress, or blocked-pending-procurement.
+> No branch listed below will be cut. No task listed below will be closed. If you arrived here
+> looking for the current state of Epic 6, **stop and read [`PROJECT_PLAN.md`](PROJECT_PLAN.md)
+> Epic 6 — Telemetry quality**, which is what that number now means. This file is kept only
+> for the reference material catalogued in **§A3** below.
+
+## A. The archive header (2026-08-06)
+
+### A1. Why this was dissolved
+
+**Every vehicle in the program is already covered by COTS avionics or by motor ejection, so
+the requirement this plan was written against does not exist.**
+
+| Vehicle | Deployment | Consequence for this plan |
+|---|---|---|
+| **RadioRocket** (mini-Piercer) | **Motor ejection, no charge.** Ebay in the **nose cone**, shear pins to the lower body. | Nothing to fire. |
+| **KatanaJR** | **Altus Metrum mini** — COTS altimeter. | A flight-proven commercial unit already does this job. |
+| **High Power Zephyr** | **Nose-cone ebay.** | Same. |
+
+Self-built relay deployment was never a requirement — it was an *available* capability that
+this plan gave shape to before anyone asked what would fly on it. Once the three airframes are
+enumerated, the answer is that none of them needs it.
+
+### A2. The consequence worth recording
+
+**Dissolving this epic removes the only safety-critical subsystem from the project.
+Everything that remains is observability.**
+
+Deployment belongs to COTS avionics or to the motor. This system is the **ground segment and
+the experimental node** — it records, decodes, logs, displays and publishes; nothing it decides
+can hurt anyone or lose a rocket. That is a scope statement, not a consolation: it changes what
+"correct" costs, which evidence standards apply, and what an admitted change has to justify.
+
+**This is the same conclusion the source-agnostic-decoder framing reached from the other
+direction** — if the ground stack must not care which vehicle produced a packet, then the ground
+stack cannot be in any vehicle's control loop. Two independent lines of reasoning arriving at the
+same boundary is the reason to treat the boundary as real and stop re-deriving it.
+
+A direct casualty: the apogee hysteresis work below was justified here as a **fire-trigger
+safety** fix (§1.1). It survives — but **as a data-quality fix, which is a smaller and more
+honest claim**. See `PROJECT_PLAN.md` Epic 6.
+
+### A3. What is preserved here, and why each is worth keeping
+
+Kept deliberately. Each entry says what it is good for **outside** a deployment program, because
+that is the only reason to keep any of it.
+
+**1. MJG Firewire Initiator specifications.** Procurement research that was done and would
+otherwise have to be redone. It is also the only place in this repo where real e-match numbers
+are written down, so this file is their authority — do not restate them elsewhere.
+
+| Parameter | Value |
+|---|---|
+| Bridgewire resistance | **1 Ω ± 0.2 Ω** |
+| Max no-fire current | **0.30 A** |
+| Min all-fire current | **0.60 A** |
+| Recommended firing current | **0.75 – 1.00 A** |
+| **MAX TEST CURRENT** | **40 mA** |
+
+*Provenance: supplied by the main thread on 2026-08-06 as manufacturer figures. Not
+independently re-read off the datasheet in this worktree, and no hardware was touched. Anyone
+who ever designs against these numbers re-verifies them against the datasheet first.*
+
+**2. The 40 mA ceiling as a hard design constraint on any continuity check.** Worth keeping
+because it corrects the instinct the rest of this plan was written with. §7.2 gate G10 and §10 Q1
+frame the continuity test against the **no-fire** current (0.30 A) — but the manufacturer's
+**test-current ceiling is 40 mA, 7.5× stricter**, and that is the number to design against.
+Designing to no-fire and calling it safe would have passed every gate in §7 while violating the
+manufacturer's own limit. **Generalisable lesson: the binding limit is the one the manufacturer
+states for the activity you are performing, not the one that names the hazard you are avoiding.**
+
+**3. The single-fault note on the continuity path.** The sharpest safety finding in the whole
+epic, and it survives the archive because it is a *reasoning pattern*, not a pyro fact:
+
+> **If the current limiter in the continuity sense path shorts, the sense path becomes a firing
+> path.** A shorted limiter puts the sense supply directly across a 1 Ω bridgewire — on a
+> nominal 3.4 V rail that is **~3.4 A**, roughly 5.7× the 0.60 A all-fire current and ~85× the
+> 40 mA test ceiling. **A measuring instrument turned into a firing circuit by one component
+> failure**, in the one subsystem whose entire justification was that it made things safer.
+
+Keep it as the canonical worked example of *the sense path and the actuation path sharing a
+conductor means one fault merges them* — which is a design question in any system that measures
+the thing it also drives.
+
+**4. The relay bench procedure** (§2 unit 6.1b; §7.2 gates G1–G3; §10 Q2 and Q7): **coil pull-in
+at the lowest expected flight-battery voltage, drop-out, and hold under load**, with the supply
+rail observed during actuation, into a representative load. Retained because it characterises
+**a relay**, not a pyro channel — the 2× STEMMA relays are still on hand and unassigned, and the
+"actuates at 5.0 V on the bench, does not at 3.5 V on battery" failure applies to whatever they
+eventually switch. The specific finding to carry forward: **the Feather M0 has no 5 V rail on
+battery, so a bench test on USB proves nothing about flight behaviour.**
+
+**5. The welded-contact-before-firing hazard analysis** (§6.2, row "Stuck / welded relay
+contact"): a contact welded *before* the flight fires the charge **the instant the pad-safety
+pin is pulled**, on the pad, with people at the rocket. Kept because it is this project's
+clearest instance of a general class — **a latent fault whose consequence is deferred until the
+exact moment a human is closest to the hazard**, detectable beforehand only by sensing the state
+you assume rather than the state you commanded. The mitigation pair (sense the fire node *before*
+enabling; pull the safety interlock last, one person, area clear) is reusable wherever an
+interlock guards stored energy.
+
+### A4. What did NOT survive
+
+Everything else: the arm-pin state machine (§3), the 12 fire invariants (§3.3), `Dep`/`DepT`/
+`Cont` telemetry (§8) — **do not reserve these tag names**, the ground-never-in-the-fire-path
+lock (§8), the G1–G10 gate ladder (§7.2), the dry-flight/live-charge test sequence (§2 6.3), and
+**the proposed ADR 0004 on deployment safety (§2 unit 6.1e), which is not to be ratified — and
+note that the number 0004 was contested: `docs/adr/draft-0004-frame-type-classification.md` is a
+different draft holding the same number. That collision is resolved by this archive; 0004 is the
+frame-type ADR.** Also dead: the "Epic 6 is
+the only safety-critical epic and the one that unblocks flying" framing that opens the original
+text below — it was true when written and is false now.
+
+### A5. Reviving this would take a new requirement, not a change of mind
+
+Nothing here is "deferred". Reviving it requires **an airframe that will fly and has no COTS or
+motor-ejection path** — stated as that vehicle and that flight, before any branch is cut. Absent
+that, this file stays archived.
+
+---
+---
+
+# ↓↓↓ ORIGINAL PLAN TEXT — HISTORICAL, SUPERSEDED BY §A ABOVE ↓↓↓
+
+*Unmodified below this line, preserved as written. Its present-tense claims ("Epic 6 is the only
+safety-critical epic", "6.1 is blocked on procurement", every "must" and "will") describe a plan
+that was abandoned on 2026-08-06. Read it as a record of reasoning, never as instructions.*
+
 # Epic 6 — Relay deployment: implementation plan
 
 **Status: PROPOSAL. Nothing here is built. No code was written for this document.**

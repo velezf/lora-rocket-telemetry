@@ -1,0 +1,133 @@
+diff --git a/firmware/src/main.cpp b/firmware/src/main.cpp
+index 7c420e7..c0e9ce9 100644
+--- a/firmware/src/main.cpp
++++ b/firmware/src/main.cpp
+@@ -31,6 +31,7 @@
+ #include <launch_confirm.h>
+ #include <apogee_confirm.h>
+ #include <convert.h>
++#include "imu9dof.h"
+ 
+ // -------------------- Pins / radio --------------------
+ #define RFM95_CS    8
+@@ -45,6 +46,8 @@ static const unsigned int SRC_ID = 1;  // 1 = sled
+ RH_RF95 rf95(RFM95_CS, RFM95_INT);
+ Adafruit_BMP3XX bmp;
+ Adafruit_ADXL375 adxl(0x53, &Wire);
++// Epic 5 science channel. Probed, not hardcoded — see firmware/src/imu9dof.h.
++imu9dof::Sled9Dof nineDof;
+ 
+ // Confirmed launch: threshold + 100 ms dwell. LaunchDetector latched in-flight on a SINGLE
+ // sample over 3 g, and 20 Hz sampling makes that materially worse — at 50 ms ticks ANY
+@@ -61,6 +64,20 @@ float peakG = 0.0f;
+ unsigned int seq = 0;             // SEQ, wraps at 65535
+ unsigned long launchTime = 0;
+ 
++// 9-DoF state. `have9Dof` gates every use: a missing SCIENCE sensor must never
++// take out the flight loop, which is why its begin() below is deliberately NOT
++// fatal while the BMP390 and ADXL375 checks are. Losing a roll rate is cheap;
++// losing the altitude record because a QT cable worked loose is not.
++bool  have9Dof     = false;
++float lastRollDps  = 0.0f;
++float peakRollDps  = 0.0f;
++unsigned long gyroSaturations = 0;
++imu::BiasAccumulator gyroBias;
++// MOUNTING FACT, not a sensor fact: which board axis runs down the airframe.
++// Nothing in the data reveals a wrong choice — a mis-set axis just reports a
++// different, entirely plausible, roll rate. Re-check on every re-mount.
++static const imu::Axis LONG_AXIS = imu::Axis::Z;
++
+ float readBatteryVoltage() {
+   int raw = analogRead(A7);  // A7 reads battery via a 2:1 divider
+   return raw * 3.3f / 1023.0f * 2.0f;
+@@ -90,6 +107,27 @@ void setup() {
+   groundPressure = sum / 50.0f;
+ 
+   if (!adxl.begin()) { Serial.println("ADXL375 not found"); while (1); }
++
++  // NOT FATAL — see the have9Dof comment above.
++  have9Dof = nineDof.begin(&Wire);
++  Serial.print("9-DoF: ");
++  if (have9Dof) {
++    Serial.print("LSM6DSOX 0x"); Serial.print(nineDof.gyro_address(), HEX);
++    Serial.print(" LIS3MDL 0x"); Serial.println(nineDof.mag_address(), HEX);
++    // Zero-rate offset, measured against stillness on the pad. The gate makes
++    // the calibration REFUSE a bumped pad rather than average the bump into
++    // the zero — a silently-wrong bias is indistinguishable from a real roll.
++    for (int i = 0; i < 200; i++) {
++      imu9dof::Reading r = nineDof.read();
++      gyroBias.add_if_still(r.gx_dps, r.gy_dps, r.gz_dps, 5.0f);
++      delay(5);
++    }
++    Serial.print("gyro bias dps "); Serial.print(gyroBias.mean_x()); Serial.print(' ');
++    Serial.print(gyroBias.mean_y()); Serial.print(' '); Serial.print(gyroBias.mean_z());
++    Serial.print(" n="); Serial.println(gyroBias.count());
++  } else {
++    Serial.println("ABSENT (flight continues; Roll/Spin unavailable)");
++  }
+   Serial.println("Sled TX ready (ADR v1)");
+ }
+ 
+@@ -119,6 +157,11 @@ static bool  haveSample = false;
+ // property, not a chosen one. Counting and printing it means the number arrives with the
+ // build instead of gating it, and a shortfall is visible on the bench rather than inferred.
+ static unsigned long sampleCount = 0, sampleWindowStart = 0, baroFailures = 0;
++// PER-TICK WORK, which the achieved-rate counter above cannot see: with a 50 ms
++// tick, any work under 50 ms produces exactly 20 Hz, so the RATE line is flat
++// right up to the cliff and reveals nothing about how much headroom is left.
++// This is the number needed to decide whether another sensor is affordable.
++static unsigned long tickUsSum = 0, tickUsMax = 0;
+ 
+ void loop() {
+   const unsigned long now = millis();
+@@ -126,6 +169,7 @@ void loop() {
+   // ---- SAMPLE (fast) ----
+   if (now - lastSampleMs >= SAMPLE_MS) {
+     lastSampleMs = now;
++    const unsigned long tickStartUs = micros();
+     // A failed barometer read skips THIS SAMPLE ONLY. It used to `return` from the whole
+     // loop, which also skipped the transmission — one bad I2C read cost a packet, and at
+     // 20 Hz there are 20x more chances to hit it. One failure path must not take out an
+@@ -143,11 +187,26 @@ void loop() {
+     adxl.getEvent(&e);
+     lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
+ 
++    if (have9Dof) {
++      imu9dof::Reading r = nineDof.read();
++      lastRollDps = imu::roll_rate_dps(r.gx_dps - gyroBias.mean_x(),
++                                       r.gy_dps - gyroBias.mean_y(),
++                                       r.gz_dps - gyroBias.mean_z(), LONG_AXIS);
++      if (fabsf(lastRollDps) > fabsf(peakRollDps)) peakRollDps = lastRollDps;
++      // Counted, never silently rescaled: a railed gyro is a floor, not a
++      // measurement, and no ground-side derivation can recover that afterwards.
++      if (r.gyro_saturated) gyroSaturations++;
++    }
++
+     if (launchDet.update(lastG, now)) launchTime = now;
+     if (launchDet.is_in_flight()) {
+       if (haveSample) apogeeDet.update(lastAltFt, now);
+       if (lastG > peakG) peakG = lastG;
+     }
++
++    const unsigned long tickUs = micros() - tickStartUs;
++    tickUsSum += tickUs;
++    if (tickUs > tickUsMax) tickUsMax = tickUs;
+   }
+ 
+   // ---- TRANSMIT (slow, unchanged) ----
+@@ -182,8 +241,13 @@ void loop() {
+     if (sampleWindowStart == 0) sampleWindowStart = now;
+     else if (now - sampleWindowStart >= 5000UL) {
+       Serial.print("RATE: "); Serial.print(sampleCount * 1000.0f / (now - sampleWindowStart));
+-      Serial.print(" Hz achieved, baro failures "); Serial.println(baroFailures);
+-      sampleCount = 0; sampleWindowStart = now;
++      Serial.print(" Hz achieved, baro failures "); Serial.print(baroFailures);
++      Serial.print(", tick us avg "); Serial.print(sampleCount ? tickUsSum / sampleCount : 0);
++      Serial.print(" max "); Serial.print(tickUsMax);
++      Serial.print(", roll dps "); Serial.print(lastRollDps);
++      Serial.print(" peak "); Serial.print(peakRollDps);
++      Serial.print(", gyro sat "); Serial.println(gyroSaturations);
++      sampleCount = 0; sampleWindowStart = now; tickUsSum = 0; tickUsMax = 0;
+     }
+   }
+ }

@@ -46,12 +46,13 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 Adafruit_BMP3XX bmp;
 Adafruit_ADXL375 adxl(0x53, &Wire);
 
-// Confirmed launch: threshold + 100 ms dwell. LaunchDetector latched in-flight on a SINGLE
-// sample over 3 g, and 20 Hz sampling makes that materially worse — at 50 ms ticks ANY
-// transient wider than one tick is caught, and a hand-knock is 10-100 ms. A real launch is
-// SUSTAINED, so a short dwell discriminates almost perfectly; at 1 Hz it degrades to the old
-// single-sample behaviour rather than breaking.
-launch::Confirm launchDet(3.0f, 100);        // default 3.0 g threshold
+// Confirmed launch: CONFIRM-OR-REVERT. The accel gate (3 g held 100 ms) only decides when to
+// START watching altitude; the ALTITUDE GAIN is what declares the launch, and a provisional
+// that never climbs reverts instead of latching forever. Measured on the profiles: a dwell
+// separates a knock from a launch by a factor of two, altitude separates them by three orders
+// of magnitude, so the dwell stays short and altitude does the rejecting. St:1 costs 531-944 ms
+// of extra St:0 on the wire; MET zero is BACKDATED to the accel gate, so it is not delayed.
+launch::Confirm launchDet;   // 3 g / 100 ms / 50 ft / 2000 ms / fallback 300 ms
 // Confirmed apogee: hysteresis + dwell, so one noisy boost sample cannot latch St:2 for
 // the whole flight and corrupt the flight record. Constants are in TIME, not samples.
 apogee::Confirm apogeeDet(20.0f, 300);
@@ -130,7 +131,10 @@ void loop() {
     // loop, which also skipped the transmission — one bad I2C read cost a packet, and at
     // 20 Hz there are 20x more chances to hit it. One failure path must not take out an
     // unrelated responsibility.
-    if (bmp.performReading()) {
+    // baroOk is the launch detector's altitude-validity signal as well as the failure counter:
+    // a read that did not answer must not be allowed to look like "altitude is not climbing".
+    const bool baroOk = bmp.performReading();
+    if (baroOk) {
       lastAltFt  = pressure_to_altitude_ft(bmp.pressure / 100.0f, groundPressure);
       lastTempC  = bmp.temperature;
       haveSample = true;
@@ -143,7 +147,14 @@ void loop() {
     adxl.getEvent(&e);
     lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
 
-    if (launchDet.update(lastG, now)) launchTime = now;
+    // launch_ms() is BACKDATED to the accel gate, so the confirmation window buys robustness
+    // without moving MET zero. Using `now` here would charge MET for the whole window.
+    if (launchDet.update(lastG, lastAltFt, baroOk, now)) {
+      launchTime = launchDet.launch_ms();
+      Serial.print("LAUNCH confirmed, MET zero at "); Serial.print(launchTime);
+      Serial.print(" ms, reverts "); Serial.print(launchDet.reverts());
+      Serial.println(launchDet.used_fallback() ? ", ALTITUDE UNAVAILABLE (accel-only)" : "");
+    }
     if (launchDet.is_in_flight()) {
       if (haveSample) apogeeDet.update(lastAltFt, now);
       if (lastG > peakG) peakG = lastG;
@@ -182,7 +193,10 @@ void loop() {
     if (sampleWindowStart == 0) sampleWindowStart = now;
     else if (now - sampleWindowStart >= 5000UL) {
       Serial.print("RATE: "); Serial.print(sampleCount * 1000.0f / (now - sampleWindowStart));
-      Serial.print(" Hz achieved, baro failures "); Serial.println(baroFailures);
+      Serial.print(" Hz achieved, baro failures "); Serial.print(baroFailures);
+      // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
+      // telling you it was knocked -- and that it correctly declined to call it a launch.
+      Serial.print(", launch reverts "); Serial.println(launchDet.reverts());
       sampleCount = 0; sampleWindowStart = now;
     }
   }

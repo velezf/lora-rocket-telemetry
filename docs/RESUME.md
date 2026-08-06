@@ -110,6 +110,115 @@ at 1 Hz and 20 Hz and MEASURE the deployment latency. Today that claim rests on 
 arithmetic (~257 ft at 128.8 ft/s vs ~27 ft at 41.9 ft/s). This turns it from computed into
 measured, before any firmware is committed to it — which is this project's own evidence standard.
 
+### EVIDENCE-TRUST PATTERN #4 (2026-08-06) — A TEST DERIVED FROM THE SAME ASSUMPTION AS THE IMPLEMENTATION IS NOT INDEPENDENT EVIDENCE
+
+The sharpest one yet, and the strongest possible justification for having built `6.0b` FIRST.
+
+While designing launch confirm-or-revert, "acceleration dropping back below threshold means the
+transient is over, so revert" felt obviously right. It was written into `launch::Confirm`, and a
+test — `test_accel_dropout_during_provisional_reverts_immediately` — was written asserting exactly
+that. **The test passed. Both were wrong together.**
+
+The profile harness caught it in one run: an **A8 NEVER CONFIRMED**. Its burn is 0.5 s but it does
+not clear 50 ft until 0.557 s, so burnout arrives first and the launch was discarded at the instant
+the rocket began coasting. **Every real launch drops below 3 g at burnout — that is what burnout
+IS.** The rule was not merely imprecise; it was backwards for the general case.
+
+**Why the test could not have caught it.** The test encoded the same belief the implementation
+did, so it was a restatement, not a check. Green meant "the code does what I assumed", never "the
+assumption is true". Only ANALYTIC GROUND TRUTH — a profile with a known apogee time and a known
+altitude-versus-time curve, written before the detector — could separate the two.
+
+**The rule:** a test written from the same mental model as the code under test measures
+self-consistency, not correctness. Independent evidence has to come from outside that model:
+ground truth, a physical measurement, or a second derivation. This is what `lib/profile` is FOR,
+and it earned its place the first time it was pointed at something.
+
+### EVIDENCE-TRUST PATTERN #5 (2026-08-06) — A TEST ASSERTING A PROXY FOR THE PROPERTY IS NOT A TEST OF THE PROPERTY
+
+A DIFFERENT failure from #4, the same day, and worth keeping separate because the fix is different.
+
+Having removed the accel-dropout revert, the confirm window became the ONLY revert path — so the
+question was whether PROVISIONAL could be held open forever. The test drove 100 s of oscillating
+acceleration and asserted `is_provisional() == false` at the end. It failed, and the failure was
+the TEST's, not the code's: the detector legitimately re-enters PROVISIONAL immediately after
+reverting, so the state at an arbitrary final instant measures **PHASE**, not boundedness.
+
+**The property was "no continuous provisional run exceeds the ceiling". The assertion was "not
+provisional right now".** Those are not the same claim, and the proxy is satisfiable by luck and
+falsifiable by luck. Rewritten to track the longest CONTINUOUS provisional run and assert it stays
+within `max_provisional_ms` + one sample period — which is the property, stated directly.
+
+**The rule:** when a test fails, first ask whether the assertion is the property or a stand-in for
+it. A proxy that is cheap to assert is usually cheap because it has thrown away the quantifier —
+here, "for all runs, the run is bounded" collapsed into "at this instant, no run is open".
+
+### RESTATED-FACT FAILURE #5 (2026-08-06) — CITE-DON'T-RESTATE APPLIES TO AGENT BRIEFS
+
+`docs/RESUME.md:457` already recorded it: the sled 9-DoF is **LSM6DSOX at I²C 0x6a (WHO_AM_I
+0x6C)** and **LIS3MDL at I²C 0x1c (WHO_AM_I 0x3D)**. The sensor-census agent brief restated this
+from memory as "hardware at I²C addresses 0x6C and 0x3D" — **turning WHO_AM_I register VALUES into
+bus ADDRESSES** — and sent the agent hunting a mystery that was already solved. It cost roughly
+twenty minutes before the correction landed.
+
+**The new surface:** cite-don't-restate has been applied to docs and to claims made to Frank. An
+AGENT BRIEF is the same hazard with less feedback — the agent cannot tell that the premise is
+wrong, has no independent access to the belief being restated, and will spend its whole budget
+inside a false frame. A brief is a document that acts, so it inherits the rule.
+
+**The fix:** briefs must POINT at the source (`docs/RESUME.md:457`) rather than paraphrase it, and
+must tell the agent to read RESUME before concluding anything about integration state. Facts
+carried in a brief should be quoted with their location or not carried at all.
+
+**Two further defects fell out of the same session**, both found by measurement rather than
+reasoning: (a) a stale PROVISIONAL kept its old anchor when a real launch began, backdating MET
+**472 ms wrong**; and (b) once accel-dropout no longer reverted, the confirm window became the only
+revert path — and re-anchoring restarted it, so oscillating acceleration could hold PROVISIONAL
+**forever**. That is the removed latch reappearing in a new location. Fixed with an absolute
+ceiling (`max_provisional_ms`, 5 s) measured from FIRST entry and never re-anchored. **Removing one
+latch is not licence to leave a different one behind** — Frank asked the question that found it.
+
+### MEASURED 2026-08-06 — the detectors, from the harness rather than the design intent
+
+**`ApogeeConfirm(20 ft, 300 ms)` has a FIXED PRICE, not a proportional one.** At the measured
+17 Hz, across a 30x range of apogee altitude (442 ft to 13,390 ft), latency is **1.47–1.52 s** and
+altitude lost is **34.8–37.0 ft**. It is constant because the fall past apogee is free-fall: how
+high you got has no bearing on how long it takes to drop 20 ft.
+
+**The band costs 3.7x the dwell, which inverts the design assumption.** Falling 20 ft from rest is
+1.115 s; the dwell is 0.300 s; one sample period is 0.059 s — total 1.474 s, matching the
+measurement to 2%. **If apogee latency ever needs cutting, cut the BAND, not the dwell.**
+
+**Depth alone never fires.** Single-sample spikes at 5, 15, 19.9, 20.1 and 50 ft below the running
+max are ALL rejected — persistence is what fires, not depth. So at 17 Hz the band is not doing the
+rejection work; **the band's actual job is stopping sensor noise from ratcheting the running max**,
+which is a different and still-necessary job.
+
+**Launch: 100 ms stays, and 300 ms was the wrong knob.** Measured at 59 ms/sample, a 100 ms dwell
+LAUNCHES on a 3-sample (177 ms) knock; 300 ms needs 7 samples (413 ms). But altitude separates
+handling from launch by **three orders of magnitude** (smallest motor: +40 ft at 0.5 s, +117 ft at
+1.0 s; handling: 0 ft, always) where a dwell separates them by a **factor of two**. Tuning the
+dwell was tuning the weaker discriminator. 300 ms would also have consumed **60% of an A8's burn**.
+The dwell stays at 100 ms and altitude does the rejecting; 300 ms is reused for the accel-only
+FALLBACK, where the better discriminator is gone and the weaker one should be tightened.
+
+**Window sizing, from the slowest real case.** The A8 is the slowest motor to reach the 50 ft
+confirm threshold: **0.557 s**. Worst MEASURED confirmation across all profiles was **944 ms** (the
+gentle 4 g profile). `confirm_ms` is **2000 ms** — 3.6x the slowest-case climb and 2.1x the worst
+measured confirmation. Generous on purpose: **the risk is asymmetric.** Too short discards a real
+launch and the flight records St:0 throughout, which is unrecoverable; too long only leaves an
+unpublished PROVISIONAL pending a little longer, which costs nothing observable.
+
+**Cost of confirm-or-revert on the wire:** St:1 arrives **531–944 ms** late (A8 590, F15 531,
+gentle 944, H 649) — under one extra St:0 packet at 1 Hz. **MET zero does not move**, because
+`launch_ms()` is backdated to the accel gate. With a dead barometer the fallback confirms at
+**354 ms** on every profile.
+
+**The altitude confirm is a DELTA FROM t0, not AGL from the pad baseline** — so it inherits no
+dependency on the baseline's settling window. Verified rather than assumed: a 63 hPa error in
+`groundPressure` (1,795 ft of absolute offset) changes the measured 50 ft gain by **0.6 ft**. The
+baseline term cancels, and it is locked in `setup()` before `loop()` ever runs.
+
 ### DECIDED 2026-08-03 — deployment events: ONE EVENT, on a TWO-CHANNEL machine
 
 Apogee-only, which is also the standard L1/L2 configuration and what is actually being flown. The

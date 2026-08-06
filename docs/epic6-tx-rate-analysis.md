@@ -163,26 +163,94 @@ with a one-line falsification test — see §8, M1. **It should be settled befor
 is worked**, and it should be settled before any TX-rate change, because it determines whether
 non-blocking TX is sufficient on its own.
 
-### What a naive `TX_MS` change does
+### 4.1 The coupling, tabulated — under BOTH sample-cost models
 
-| TX rate | duty (88 B) | achieved sample rate, BLOCKING TX (today) | with NON-BLOCKING TX |
+Two models are in play and they disagree, so both are carried rather than one being picked:
+
+- **MODEL A (tick-limited)** — the sensor tick fits inside `SAMPLE_MS = 50 ms`, so the loop
+  free-runs at **20.00 Hz** and the *only* thing stealing ticks is the blocking transmit.
+  `achieved = 20 x (1 - tx_hz x ToA)`.
+- **MODEL B (sensor-limited)** — the BMP390 + ADXL tick really costs **59 ms**
+  (`docs/RESUME.md:29-30`), so the loop free-runs at 16.95 Hz *and* loses ticks to TX.
+  `achieved = (1 - tx_hz x ToA) / 0.059`.
+
+**Typical 88-byte frame — ToA = 158.98 ms**
+
+| TX Hz | blocking ms/s | duty | ticks lost/s (A, 50 ms) | **A: achieved** | samples lost/s (B, 59 ms) | **B: achieved** |
+|---|---|---|---|---|---|---|
+| 1 | 159 | 15.9 % | 3.2 | **16.82 Hz** | 2.7 | 14.25 Hz |
+| 2 | 318 | 31.8 % | 6.4 | **13.64 Hz** | 5.4 | 11.56 Hz |
+| 3 | 477 | 47.7 % | 9.5 | **10.46 Hz** | 8.1 | 8.87 Hz |
+| 4 | 636 | 63.6 % | 12.7 | **7.28 Hz** | 10.8 | 6.17 Hz |
+| 5 | 795 | 79.5 % | 15.9 | **4.10 Hz** | 13.5 | 3.48 Hz |
+| 6 | 954 | 95.4 % | 19.1 | **0.92 Hz** | 16.2 | 0.78 Hz |
+
+**Saturated worst 113-byte frame — ToA = 194.82 ms**
+
+| TX Hz | blocking ms/s | duty | ticks lost/s (A) | **A: achieved** | samples lost/s (B) | **B: achieved** |
+|---|---|---|---|---|---|---|
+| 1 | 195 | 19.5 % | 3.9 | **16.10 Hz** | 3.3 | 13.65 Hz |
+| 2 | 390 | 39.0 % | 7.8 | **12.21 Hz** | 6.6 | 10.35 Hz |
+| 3 | 584 | 58.4 % | 11.7 | **8.31 Hz** | 9.9 | 7.04 Hz |
+| 4 | 779 | 77.9 % | 15.6 | **4.41 Hz** | 13.2 | 3.74 Hz |
+| 5 | **974** | **97.4 %** | 19.5 | **0.52 Hz** | 16.5 | 0.44 Hz |
+| 6 | 1169 | 116.9 % | — | **SAMPLING STOPS** | — | **SAMPLING STOPS** |
+
+**Frank's arithmetic is confirmed exactly.** "~200 ms ToA, ~1000 ms of blocking per second at
+5 Hz, leaving no loop time to sample" = the 113 B row: **194.82 ms x 5 = 974 ms/s, 97.4 % duty,
+0.52 Hz sampling.** On the typical 88 B frame it is 795 ms/s and 4.10 Hz. **Both are catastrophic**
+and the conclusion does not depend on which frame size or which sample model you use.
+
+**Where it collapses:** sampling crosses **below the 8 Hz abort floor** (`docs/RESUME.md:31`)
+between **2 and 3 Hz** on the worst-case frame, and between **3 and 4 Hz** on the typical one.
+**That is the real ceiling today — roughly 3 Hz, not the 5.13 pkt/s airtime ceiling of §3.**
+
+At 5 Hz blocking, `apogee::Confirm`'s 300 ms dwell (`firmware/src/main.cpp:57`) is **one sample**
+and `launch::Confirm`'s 100 ms dwell (`main.cpp:54`) is **zero samples** — silently degrading it
+back to the single-sample latch it was written to remove. Both are documented as *"constants are
+in TIME, not sample counts"* so they lose resolution rather than break outright, but a dwell
+resolved by one sample is not a dwell. **More packets carrying worse flight-state is a net loss.**
+
+### 4.2 Which model is right — the measurement discriminates, but confirm it
+
+| | prediction at TX 1 Hz, 84 B pad frame | prediction, 88 B | **measured** |
 |---|---|---|---|
-| 1 Hz | 15.9 % | 16.8 Hz | ~20 Hz |
-| 2 Hz | 31.8 % | **13.6 Hz** | ~20 Hz |
-| 5 Hz | 79.5 % | **4.1 Hz** | ~20 Hz |
-| 10 Hz | 159 % | **sampling stops** | over the RF ceiling |
+| MODEL A | **16.92 Hz** | 16.82 Hz | **17.00 Hz** |
+| MODEL B | 14.34 Hz | 14.25 Hz | **17.00 Hz** |
 
-**At 5 Hz the sled would sample at 4 Hz.** That is below the 8 Hz abort floor named in
-`docs/RESUME.md:31`, and it guts the two detectors Epic 6 Phase 0 just landed: `apogee::Confirm`'s
-300 ms dwell (`firmware/src/main.cpp:57`) would be **one sample**, and `launch::Confirm`'s 100 ms
-dwell (`main.cpp:54`) would be **zero samples** — silently degrading it back to the single-sample
-latch it was written to remove. Both are documented as *"constants are in TIME, not sample counts"*
-so they degrade in resolution rather than break, but a dwell resolved by one sample is not a dwell.
+The bench run was entirely `St:0` pad frames (`docs/RESUME.md:36-37` — `St` was `[0]` only across
+all 115 packets), i.e. the 84 B frame. **Model A predicts it to within 0.5 %; Model B is 16 % low.**
+The achieved-rate reporter is unbiased for this purpose: `sampleWindowStart` and `now` are both
+captured at the top of `loop()` before the transmit (`main.cpp:124,182-186`), so a 5 s window
+contains exactly 5 transmits, and `sampleCount` counts loop ticks whenever `baroFailures` is 0.
+
+**So the 59 ms/sample figure and the 17.00 Hz figure cannot both be true**, and the difference
+matters for what the fix buys: under A, non-blocking TX restores ~20 Hz; under B it restores only
+~17 Hz and the sensor becomes the floor. **The fix is required either way** — only its payoff
+changes. §8 M1 settles it with one line of firmware and one serial line of output.
+
+### 4.3 The ceiling BOTH ways — this is the value of the architecture change
+
+Ceiling defined as the highest TX rate that keeps sampling at or above the **8 Hz abort floor**,
+sized on the saturated-worst frame and the pessimistic sample model (Model B):
+
+| Radio config | **BLOCKING send (today)** | **NON-BLOCKING send** | gain | sampling at the ceiling |
+|---|---|---|---|---|
+| **SF7/BW125 (today)** | **2.7 Hz** | **5.13 Hz** (airtime-bound) | **x1.89** | 8 Hz → **~17–20 Hz** |
+| SF7/BW250 | 5.4 Hz | 10.27 Hz | x1.89 | 8 Hz → ~17–20 Hz |
+| SF7/BW500 | 10.8 Hz | 20.53 Hz | x1.89 | 8 Hz → ~17–20 Hz |
+
+**Two separate wins, and the second is bigger than the first.**
+1. **TX rate: x1.89 at every bandwidth** — the ratio is constant because both ceilings are `1/ToA`
+   scaled by a different constant, so this is a property of the architecture, not of the radio.
+2. **Sample rate stops being collateral damage.** At the blocking ceiling the sled is sampling at
+   exactly the abort floor. Non-blocking, it samples at its free-running rate *at any TX rate below
+   the airtime ceiling* — **5x better sampling at 5 Hz TX (4.10 → ~20 Hz)**. Since apogee latency
+   is the thing Epic 6 Phase 0 exists to reduce (33.8 ft at 20 Hz vs 77.9 ft at 1 Hz,
+   `firmware/src/main.cpp:107-108`), **this is the change that actually protects the epic's premise.**
 
 **So the change is not "edit `TX_MS`". The change is "stop blocking on TX, then edit `TX_MS`."**
-The fix is small: drop the trailing `waitPacketSent()` and guard the next send on
-`rf95.mode() != RHModeTx`. `RH_RF95::send()` already begins with its own `waitPacketSent()`, so
-without a guard the block simply moves to the next send call.
+Costed in §9.1a.
 
 ---
 
@@ -583,6 +651,58 @@ before the second is safe.**
 +    // TX it would collapse sampling to ~4 Hz — below the 8 Hz abort floor and below
 +    // what apogee::Confirm's 300 ms dwell needs. The guard above serialises transmits.
 ```
+
+**API — VERIFIED against the installed RadioHead, not assumed.** Pinned version is
+`mikem/RadioHead@1.120.0` (`firmware/platformio.ini`), confirmed `RH_VERSION_MAJOR 1` /
+`RH_VERSION_MINOR 120` in `RadioHead.h:1419-1420`.
+
+- **`isSending()` DOES NOT EXIST on `RH_RF95`.** It is defined only on `RH_NRF24`, `RH_NRF905`
+  and `RH_NRF51`. Any design that reaches for it will not compile.
+- **`mode()` is the correct equivalent and is public** — `RHGenericDriver.h:224`
+  (`virtual RHMode mode();`, under the `public:` at line 43), returning `RHModeTx` while a
+  transmit is in flight.
+- **Completion is INTERRUPT-driven, so `mode()` is a genuine zero-cost poll.** `RH_RF95.cpp`
+  `handleInterrupt()` has `else if (_mode == RHModeTx && irq_flags & RH_RF95_TX_DONE) { _txGood++;
+  setModeIdle(); }`, and `setModeIdle()` sets `_mode = RHModeIdle` (`RH_RF95.cpp:392-398`).
+  `_mode` is `volatile` (`RHGenericDriver.h:264`). The ISR is live on this board — `RFM95_INT`
+  is pin 3 (`main.cpp:38`) and `rf95.init()` returns false if it is not a valid interrupt pin.
+  **So the check costs no SPI traffic and no busy-wait.**
+- `waitPacketSent(uint16_t timeout)` (`RHGenericDriver.h:123`) exists as a bounded fallback if a
+  guard is unwanted, but it still spins. `mode()` is strictly better.
+
+**Verdict: RadioHead makes this CLEAN on this driver, not awkward.** Two lines changed, no new
+state machine, no library patch.
+
+**What happens when the next TX tick arrives with a send still in flight — SKIP, and the
+sub-decision matters more than the choice.**
+
+| Option | Verdict |
+|---|---|
+| **Overwrite** | **Not available.** `RH_RF95::send()` opens with its own `waitPacketSent()`, so it cannot pre-empt; the only abort is `setModeIdle()`, which corrupts the frame in the air. Rejected. |
+| **Queue** | **Rejected on merit.** Telemetry is a latest-value stream, not a reliable byte stream. A queued packet goes out carrying data that is already one period stale, and under sustained back-pressure the queue only ever grows staler. Also needs a buffer and a deferred-send state machine — real complexity for a worse answer. |
+| **Skip** | **Correct.** Drop this tick; the next tick builds a **fresh** packet from the newest sample. Self-correcting, zero state. |
+
+> **AND DO NOT INCREMENT `seq` ON A SKIP.**
+> `seq` is incremented at `firmware/src/main.cpp:179`, immediately after the send. If a skipped
+> tick burns a sequence number, the ground records it as a **lost packet** — and `SEQ` gaps are the
+> sole input to `packets_lost` (`ground/flights/segmenter.py:184`) and the published `loss_pct`
+> (`ground/publish/data.py:43`). A sled-side scheduling decision would be published as an RF-link
+> statistic. **This is the same defect as §6.1's RX-loop overrun, on the other end of the link**, and
+> it has the same fix: keep the two accountable separately. Count skips in a local `txSkipped` and
+> print it beside `RATE:` so it is visible on the bench.
+
+At the recommended 5 Hz (200 ms period) against a 194.82 ms worst-case ToA there are **5 ms of
+margin**, so skips are not hypothetical — they will occur on wide frames. The behaviour must be
+specified, not discovered.
+
+**One hardening note the current code also needs.** `_mode` is cleared *only* by the ISR. If a
+TxDone interrupt were ever missed, `mode()` would read `RHModeTx` forever and transmission would
+stop permanently. **Today's code has the same failure mode and it is worse** —
+`waitPacketSent()`'s `while (_mode == RHModeTx) YIELD;` is an unbounded loop, so a missed
+interrupt hangs the sled outright rather than stalling TX. The guard should therefore carry a
+watchdog: if `mode() == RHModeTx` for longer than ~2x the worst-case ToA (say 500 ms), call
+`rf95.setModeIdle()` and count it. **This is a strict improvement on today regardless of the rate
+change.**
 
 **(b) State-dependent rate + landing cap — the actual feature (§5).**
 

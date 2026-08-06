@@ -117,7 +117,16 @@ void loop() {
   p.batt_v = readBatteryVoltage();
   p.met_s  = inFlight ? (unsigned int)((millis() - launchTime) / 1000UL) : 0u;
 
-  char msg[128];
+  // Additive v1 tags (ADR-0001): the per-axis ADXL375 reading that `G` is the
+  // magnitude of. Previously read and discarded — magnitude alone cannot tell a
+  // hard lateral hit from a clean axial boost, or recover orientation after the
+  // fact. Ground decoders surface unrecognized tags via `unknown`; no V bump.
+  p.has_axes = true;
+  p.ax = accel_axis_g(e.acceleration.x);
+  p.ay = accel_axis_g(e.acceleration.y);
+  p.az = accel_axis_g(e.acceleration.z);
+
+  char msg[PACKET_BUF_LEN];
   size_t n = encode_packet(p, msg, sizeof(msg));
 
   Serial.print("TX: "); Serial.println(msg);

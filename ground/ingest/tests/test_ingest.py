@@ -176,5 +176,72 @@ class TestCallsignId(unittest.TestCase):
         self.assertEqual(self.stats.snapshot(), {})      # still never into stats
 
 
+class TestAdditiveTagsDoNotPolluteLinkQuality(unittest.TestCase):
+    """GATE for additive v1 tags (ADR-0001 versioning policy).
+
+    An additive tag must be INERT on the ground side: tolerated, surfaced in
+    `unknown`, persisted to the session log — and it must NOT increment any
+    error / anomaly / foreign counter. If it did, every future additive tag
+    would silently pollute the link-quality record, and the additive-extension
+    policy the ADR grants would be unusable in practice.
+
+    Exercised through the REAL decode + ingest path (no stubs), with the
+    per-axis accelerometer tags the sled emits alongside the `G` magnitude.
+    """
+
+    AXES = b" Ax:-1.2 Ay:0.4 Az:9.7"
+
+    def setUp(self):
+        self.lines = []
+        self.stats = LinkStats()
+        self.reg = ObserverRegistry()
+        self.dispatched = []
+        self.reg.register(self.dispatched.append)
+        self.core = IngestCore(sink=self.lines.append, stats=self.stats, registry=self.reg)
+
+    def _counters(self):
+        return (self.core.errors, dict(self.core.anomalies), dict(self.core.foreign))
+
+    def test_additive_axis_tags_touch_no_counter(self):
+        before = self._counters()
+        self.core.handle(-56, GOLDEN + self.AXES, "2026-08-06T00:00:00.000Z")
+        self.assertEqual(self._counters(), before)                 # THE GATE
+        self.assertEqual(self._counters(), (0, {}, {}))            # and all still zero
+
+    def test_additive_axis_tags_still_a_fully_accepted_packet(self):
+        # Guards the hollow-pass: counters would also stay flat if the frame were
+        # dropped entirely. It must be accepted, counted, logged and dispatched.
+        self.core.handle(-56, GOLDEN + self.AXES, "2026-08-06T00:00:00.000Z")
+        self.assertEqual(self.core.decoded, 1)
+        self.assertEqual(self.stats.snapshot()[(7, 1)]["rx"], 1)
+        self.assertEqual(len(self.dispatched), 1)
+
+    def test_axis_values_land_in_unknown_and_reach_the_session_log(self):
+        self.core.handle(-56, GOLDEN + self.AXES, "2026-08-06T00:00:00.000Z")
+        rec = json.loads(self.lines[0])
+        self.assertEqual(rec["type"], "packet")
+        self.assertEqual(rec["unknown"], {"Ax": "-1.2", "Ay": "0.4", "Az": "9.7"})
+        self.assertEqual(rec["raw"], (GOLDEN + self.AXES).decode())   # verbatim
+        # the known v1 fields are untouched by the new tags
+        self.assertEqual(rec["fields"]["G"], 2.3)
+        self.assertEqual((rec["sys"], rec["src"], rec["seq"]), (7, 1, 42))
+        # and the packet the observers saw carries them too
+        self.assertEqual(self.dispatched[0].packet.unknown["Az"], "9.7")
+
+    def test_counters_stay_flat_across_a_stream_of_tagged_frames(self):
+        for seq in range(10):
+            frame = b"V:1 SYS:7 SRC:1 SEQ:%d St:1 ALT:100ft G:1.0" % seq + self.AXES
+            self.core.handle(-56, frame, "2026-08-06T00:00:00.000Z")
+        self.assertEqual(self._counters(), (0, {}, {}))
+        self.assertEqual(self.core.decoded, 10)
+
+    def test_the_gate_can_actually_fail(self):
+        # "Could this have failed?" — yes: a tag the decoder DOES route into
+        # policy (a foreign SYS) moves a counter, so flat counters above are a
+        # real observation about additive tags, not a property of the assertion.
+        self.core.handle(-56, b"V:1 SYS:9 SRC:1 SEQ:1 ALT:0ft" + self.AXES, "t")
+        self.assertNotEqual(self._counters(), (0, {}, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

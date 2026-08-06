@@ -31,5 +31,26 @@ size_t encode_packet(const Packet& p, char* out, size_t out_len) {
     if (static_cast<size_t>(n) >= out_len) {
         return out_len - 1;
     }
+
+    // Additive v1 tags appended after the canonical 12 (ADR-0001 allows new tags
+    // within a version; receivers tolerate and surface what they don't know).
+    // Skipped entirely when absent, which keeps the golden vector byte-exact.
+    if (p.has_axes) {
+        size_t used = static_cast<size_t>(n);
+        int m = snprintf(
+            out + used, out_len - used,
+            " Ax:%.1f Ay:%.1f Az:%.1f",
+            static_cast<double>(p.ax),
+            static_cast<double>(p.ay),
+            static_cast<double>(p.az));
+        if (m < 0) {
+            return used;                       // leave the v1 prefix intact
+        }
+        if (static_cast<size_t>(m) >= out_len - used) {
+            return out_len - 1;                // truncated at the buffer edge
+        }
+        n += m;
+    }
+
     return static_cast<size_t>(n);
 }

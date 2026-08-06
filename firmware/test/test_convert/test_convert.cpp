@@ -18,6 +18,26 @@ void test_accel_magnitude_3_4_0(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, 5.0f / 9.80665f, accel_magnitude_g(3.0f, 4.0f, 0.0f));
 }
 
+// Per-axis conversion feeding the additive Ax/Ay/Az tags. Must use the SAME
+// gravity constant as the magnitude, or `G` and the axes would disagree.
+void test_accel_axis_pure_gravity_is_one_g(void) {
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, accel_axis_g(9.80665f));
+}
+
+void test_accel_axis_is_signed(void) {
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -1.0f, accel_axis_g(-9.80665f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, accel_axis_g(0.0f));
+}
+
+// The axes and the magnitude are consistent by construction: for a single-axis
+// reading the magnitude equals the absolute value of that axis in g.
+void test_accel_axis_agrees_with_magnitude(void) {
+    const float x = 3.0f, y = -4.0f, z = 12.0f;
+    float mag = accel_magnitude_g(x, y, z);
+    float ax = accel_axis_g(x), ay = accel_axis_g(y), az = accel_axis_g(z);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, mag, sqrtf(ax * ax + ay * ay + az * az));
+}
+
 void test_altitude_equal_pressure_is_zero(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, pressure_to_altitude_ft(1013.25f, 1013.25f));
 }
@@ -42,6 +62,9 @@ int main(int, char **) {
     RUN_TEST(test_accel_magnitude_pure_z_is_one_g);
     RUN_TEST(test_accel_magnitude_zero_is_zero);
     RUN_TEST(test_accel_magnitude_3_4_0);
+    RUN_TEST(test_accel_axis_pure_gravity_is_one_g);
+    RUN_TEST(test_accel_axis_is_signed);
+    RUN_TEST(test_accel_axis_agrees_with_magnitude);
     RUN_TEST(test_altitude_equal_pressure_is_zero);
     RUN_TEST(test_altitude_lower_pressure_is_positive_matches_formula);
     RUN_TEST(test_altitude_ground_higher_gives_positive_climb);

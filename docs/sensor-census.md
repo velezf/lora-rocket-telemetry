@@ -517,6 +517,79 @@ mean the next person measures no improvement and concludes something is broken.
 
 ---
 
+## 6b. Packet budget for gyro + mag — the 128-byte buffer overflows, and the failure is SILENT
+
+**`char msg[128]` is a literal in `firmware/src/main.cpp:172`.** (`PACKET_BUF_LEN` does **not**
+exist at this base commit — it is on the increment-2 branch only.) Current measured worst case
+is **107 bytes**.
+
+### Encoded cost of a tag
+
+`1 (space) + len(name) + 1 (colon) + len(value)`. Worst-case values follow from the configured
+full scales: gyro ±2000 dps → 32767 × 0.070 = **2293.7 dps** → `-2293.7`, 7 chars. Mag ±4 gauss
+→ 32767 / 6842 × 100 = **478.9 µT** → `-478.9`, 6 chars.
+
+| Option | Tags | Arithmetic | Added bytes | New worst case | vs 128 |
+|--------|------|-----------|-------------|----------------|--------|
+| **A** ADR-reserved only | `Roll` `Spin` | (1+4+1+7) + (1+4+1+4) = 13 + 10 | **+23** | **130** | ❌ **overflows by 2** |
+| **B** 3-axis gyro | `Gx` `Gy` `Gz` | 3 × (1+2+1+7) = 3 × 11 | **+33** | **140** | ❌ overflows |
+| **C** gyro + mag | + `Mx` `My` `Mz` | 33 + 3 × (1+2+1+6) = 33 + 30 | **+63** | **170** | ❌ overflows |
+| **D** everything | A + C | 23 + 63 | **+86** | **193** | ❌ overflows |
+| **C on top of increment-2's `Ax/Ay/Az`** | | 143 + 63 | +63 | **206** | ❌ also over 160 |
+
+**Even the minimal, already-reserved `Roll`+`Spin` pair overflows the 128-byte buffer by 2
+bytes.** Every option does.
+
+- `160` (increment-2's `PACKET_BUF_LEN`) covers **A and B only** — not C, not D.
+- **C needs 176; D needs 208; C-with-`Ax/Ay/Az` needs 224.**
+- **The hard ceiling is 251, not "whatever we pick":** `RH_RF95_MAX_MESSAGE_LEN` = 251
+  (`RH_RF95_FIFO_SIZE 255` − `RH_RF95_HEADER_LEN 4`).
+
+### The encoder is safe. The wire is not.
+
+`encode_packet` uses `snprintf` bounded by `out_len` and, on truncation, returns `out_len - 1` —
+the bytes actually written. **VERIFIED: there is no buffer overrun and the returned length is
+honest.** The memory safety is fine.
+
+**But the frame that goes out is a silently truncated one, and the ground accepts most of them.**
+Tested against the repo's own decoder (`ground/decode/v1.py`), truncating the golden packet one
+byte at a time from the right:
+
+```
+  len  90  DecodedPacket   MET=6553      <<< ACCEPTED, MET WRONG, no error raised
+  len  89  DecodedPacket   MET=655       <<< ACCEPTED, MET WRONG
+  len  88  DecodedPacket   MET=65        <<< ACCEPTED, MET WRONG
+  len  87  DecodedPacket   MET=6         <<< ACCEPTED, MET WRONG
+  len  86..83  DecodeError  malformed-token
+  len  82..78  DecodedPacket   MET=<ABSENT>  <<< ACCEPTED, MET silently missing
+```
+
+**9 of 13 truncation points produce a frame the ground accepts without moving any counter.**
+Four carry a *well-formed but wrong* `MET` (65535 read as 6); five carry `MET` silently absent,
+which ADR 0001 explicitly declares legal ("tolerate absent tags"). Only four raise
+`malformed-token`.
+
+**This is a data-integrity defect, not a robustness nit.** The LoRa CRC passes, the decoder
+passes, no `errors` or `anomalies` counter moves, and the value in the flight record is wrong.
+It is the same shape as the named failure class — *a check that looked like it was checking*.
+
+### What follows
+
+1. **`msg[]` must grow before any gyro/mag tag ships** — to 176 (option C) or 208 (option D),
+   and it should become a named constant with a regression test, exactly as increment-2 did.
+2. **Cap it at 252, never above.** `RH_RF95::send()` returns `false` and **transmits nothing**
+   when `len > 251`, and `main.cpp:176` ignores that return — a silent no-transmit. Worse, its
+   `len` parameter is `uint8_t`: a buffer above 256 could wrap a 260-byte length to 4 and send a
+   4-byte frame.
+3. **Append new tags LAST.** `snprintf` truncates from the right, so whatever is last is what is
+   lost. Science tags at the end means a boost that overruns the buffer costs the roll rate, not
+   `ALT`.
+4. **The real fix is a length assertion at the encoder**, so an over-long packet is a loud
+   failure on the bench rather than a quiet one in the flight record. Flagged, not built — it is
+   `packet.*` and `main.cpp`, which belong to the firmware stream.
+
+---
+
 ## 7. What could not be determined without hardware
 
 Ordered by how much rests on it.

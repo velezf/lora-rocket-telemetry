@@ -83,6 +83,38 @@ sled, the loop and the ground pipeline. **It does not validate the RF path.**
 
 Until then: **any weak-RSSI symptom is the connector until proven otherwise.**
 
+### RESOLVED 2026-08-07 — why Wi-Fi profiles appear to come and go
+
+**Two profiles, two persistence mechanisms, and only one of them is durable in place.**
+
+- `iphone17-hotspot` is a **native NetworkManager profile** in
+  `/etc/NetworkManager/system-connections/`. It is edited in place and nothing regenerates it.
+- `netplan-wlan0-WideRoad` is **netplan-rendered**: the truth lives in
+  `/etc/netplan/90-NM-dd86560a-*.yaml` and is rebuilt into `/run/NetworkManager/system-connections/`
+  **on every boot**. Anything in `/run` is disposable by design, so a netplan change rewrites
+  that set wholesale.
+
+That is the mechanism, and it is observed, not guessed. **Two honest limits on the claim:**
+(a) the original "all profiles are gone" report was partly MY ERROR — the hotspot profile was
+there the whole time and a broken grep (`wifi` against a field reading `802-11-wireless`)
+could not see it; (b) whether a *home* profile ever existed before 2026-08-07 is unknown, so
+netplan regeneration is a well-supported EXPLANATION for a disappearance, not an observed
+cause of one. The durable practical consequence stands either way: **edits to a
+netplan-rendered profile are not safe from netplan; edits to a native NM profile are.**
+
+The actual cause of "no Wi-Fi" on 2026-08-06 was neither: `nmcli radio wifi` was **disabled**
+(an NM-level switch independent of rfkill) *and* `rfkill` had `phy0` **soft-blocked**. Both
+were invisible from the symptom, and both persist once set.
+
+### FIELD FALLBACK — direction two confirmed, unattended
+
+When the router came back up on 2026-08-07 the Pi moved **hotspot → WideRoad on priority with
+no input at all**. That is the same autoconnect machinery that must pick the hotspot up at the
+range, resolving the other way, and it ran unattended. Combined with the router-off validation
+(ran on hotspot alone, dashboard served, sled RX lossless), both directions of the
+priority scheme now have evidence behind them — home 100 wins at home, hotspot 50 with
+infinite retry is the only candidate at the field.
+
 ### CORRECTION — the 59 ms/sample causal story below is WRONG
 
 The section below attributes ~59 ms/sample to BMP390 conversion. The arithmetic is right and

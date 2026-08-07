@@ -178,6 +178,27 @@ down, home Wi-Fi gone: the Pi ran on the hotspot alone and served the dashboard 
 fallback, not the other way round). Sled reception continued throughout, 0 loss.
 **TAPED IP: `172.20.10.2`** — a DHCP lease on a /28, so treat the name as primary.
 
+### STANDARD SAVED-NETWORK VERIFICATION — run this on any Wi-Fi the box must join alone
+
+A profile that `nmcli connection show` reports as healthy can still never connect
+unattended. Four fields decide it, and three of them fail SILENTLY:
+
+```
+sudo nmcli -g connection.permissions,802-11-wireless-security.psk-flags,\
+              connection.autoconnect,connection.timestamp \
+     connection show "<profile>"
+```
+
+| field | required | why it fails silently otherwise |
+|---|---|---|
+| `connection.permissions` | **EMPTY** | non-empty = user-scoped: it connects only while THAT USER IS LOGGED IN. At boot nobody is. |
+| `802-11-wireless-security.psk-flags` | **0** | 0 = password stored in the profile. 1 = "ask an agent" — and there is no agent at boot. |
+| `connection.autoconnect` | **yes** | with `autoconnect-retries 0` for infinite retry |
+| `connection.timestamp` | **NON-ZERO, and advancing** | **0 means it has never once associated.** Existence, priority and a plausible password all still read fine. |
+
+**The timestamp is the only one of the four that can prove the profile has actually worked.**
+The rest describe intent; the timestamp describes history.
+
 **How we learned the profile had NEVER worked:** `nmcli -g connection.timestamp connection
 show <profile>` returned **0**. The profile existed, autoconnected, was prioritised, and had
 never once associated — every check short of the timestamp said it was fine. It now reads

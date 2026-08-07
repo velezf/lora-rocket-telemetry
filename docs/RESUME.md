@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: **2026-07-31** (Claude, on Mac + Pi 5). **This session: `feat/panel-leds` MERGED and
+_Last updated: **2026-08-07** (Claude, on Mac + Pi 5). See HANDOFF below for the live state. Earlier context: **This session: `feat/panel-leds` MERGED and
 pushed** — the six-LED supervisor is live and enabled for boot on `apogee-gs`. Also landed three
 pieces of process that outlive the branch: the **sanctioned deploy path**, the canonical
 **"designed but INERT"** register, and **"cite, don't restate"**. Repo-wide **branch cleanup**
@@ -16,6 +16,84 @@ cleanly); **OLED rewire verified** (the "dark" was a no-idle-page firmware gap, 
 logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor shell/unit — see
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
+
+## HANDOFF — 2026-08-07, start of the 10 Hz build session
+
+**NOTHING FLEW ON 2026-08-06.** The section below is titled "FLIGHT DAY" and describes a
+bench-verified build; read it as *what was prepared*, not what was flown. The flight is
+pigtail-gated (see DEFERRED).
+
+**ON `main` NOW:** the launch **confirm-or-revert** gate (merged 2026-08-06) — altitude
+confirms the launch, the accel gate only decides when to start watching, and both permanent
+latches are closed (`max_provisional_ms` bounds PROVISIONAL from first entry). Flashed and
+bench-clean: SEQ 112→157, 0 discontinuities, **RATE 17.00 Hz**, 0 baro failures, **0 launch
+reverts**, `St:0` throughout. 45/45 native tests green.
+
+**DECIDED, NOT BUILT:** [ADR 0005](adr/0005-telemetry-rate-and-rf-configuration.md) —
+**10 Hz at SF7/BW500/17 dBm**, ACCEPTED, its §8 RX-turn gate measured and passed
+(worst turn **25.65 ms** against a 100 ms budget, ~3.9x margin).
+
+### BUILD ORDER — run in this sequence, each gated by Frank
+
+1. **`ground/baseline.py WINDOW=15` → time-based.** A *sample* count calibrated in *seconds*;
+   at 10 Hz the AGL baseline silently locks on 1.5 s instead of 15 s. **Mandatory before any
+   rate change.** Ground-side, host-testable, no hardware.
+2. **`encode_packet` truncation LOUD + buffer 128 → 192.** Verified defect: on overflow it
+   returns `out_len-1`, a valid-looking length, and the fragment is transmitted. A frame cut
+   at 105 B decodes as a **valid packet with `MET:6` where the truth is 65535** — no counter
+   moves. Record the range assumptions beside the number (§4 of the ADR).
+3. **BMP390 temperature oversampling 8x → 1x** (NOT off — pressure compensation needs the
+   term). **Measure the achieved rate; do not assume the gain.**
+4. **Non-blocking TX.** Fire and poll; **`isSending()` does NOT exist on `RH_RF95`** — use
+   `mode()`. On skip, **`seq` must NOT increment** or a sled scheduling decision publishes as
+   RF loss. Guard the unbounded `waitPacketSent()` hang with a watchdog.
+5. **`Vel` + G envelope (`Gmx`/`Gmn`).** Onboard dh/dt with light smoothing; envelope reset
+   per TX window, tested. New worst case **139 B**.
+6. **Both-ends BW500.** A **both-ends constant** whose failure mode is *silent total link
+   loss*. One authority, cited — never copied.
+7. **St-dependent 10 Hz** — 1 Hz on pad, 10 Hz in flight. **Bound it**: the flight states
+   latch and there is no `St:3`, so "fast while `St != 0`" never turns off and would transmit
+   until the battery died. MET-bounded window.
+
+### RED TEAM BEFORE ANYTHING FLASHES
+
+A Fable 5 agent reviews the **actual diff**, adversarially, and **reports without fixing**.
+Brief it with this project's own failure taxonomy — every one of these shipped here:
+hollow guards (a check that cannot fail, or that never ran); **a test derived from the same
+assumption as the implementation**; **a test asserting a proxy for the property**; sentinel
+colliding with a legal value; latches with no bounded exit; silent truncation or field loss;
+restated facts that disagree with their source; evidence that does not describe the artifact
+that will fly. Its specific hunting grounds here: the **both-ends BW constant**, the
+**envelope reset logic**, and whether the **RX-turn measurement** actually covers 10 Hz.
+
+### BENCH SCOPE — bench range only, and say so
+
+The 10 Hz sustained bench runs **antenna-less at arm's length** (the link decodes fine there;
+measured **−80/−81 dBm**). Report **loss** and **FIFO-overwrite** counts. This validates the
+sled, the loop and the ground pipeline. **It does not validate the RF path.**
+
+### DEFERRED — all pigtail-gated, do not attempt
+
+- **Field-range link margin.** ADR 0005 §2's ~42 dB is a *design assumption*, unvalidated.
+- **u.FL continuity check** — centre pin NOT shorted to shield, before the new pigtail is
+  trusted. The connector was re-soldered 2026-08-06.
+- **RSSI validation of the repair** — close range back in the **−38 to −14 dBm** band.
+  Antenna-less "before" evidence: session `session-20260806T174610Z-4d657e`, 1,724 packets.
+- **The flight itself.**
+
+Until then: **any weak-RSSI symptom is the connector until proven otherwise.**
+
+### CORRECTION — the 59 ms/sample causal story below is WRONG
+
+The section below attributes ~59 ms/sample to BMP390 conversion. The arithmetic is right and
+**the causation is not**: `performReading()` does not wait for the conversion (no data-ready
+poll), so 25 + 1.35 ≈ 26 ms, not 59. **The missing ~33 ms is `rf95.waitPacketSent()`
+busy-waiting ~159 ms of air time once per second.** Two agents reached this independently.
+Consequence: **the temperature-oversampling change is not a sample-rate fix** (and its saving
+is 14.14 ms, not 16.3 — `temp_en` is set unconditionally); it is the *precondition* for any
+tick below 25 ms. **Non-blocking TX is what actually raises the rate** — zero the TX block and
+the loop returns ~20 Hz. Change the justification, or the next person measures no improvement
+and thinks something broke.
 
 ## FLIGHT DAY 2026-08-06 — what was flown, and what is waiting
 

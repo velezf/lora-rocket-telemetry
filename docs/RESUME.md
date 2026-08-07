@@ -119,7 +119,12 @@ barometer sanity signal; do not over-read it, pressure varies day to day.)
 - **The OLED trend strip becomes DECIDABLE.** Criterion already recorded: rising ramp through
   boost and coast, flatten at apogee, shallow steady decline under chute, autoscaled. A flat
   smear during descent means the autoscale is not earning its 10 px and the strip should be cut.
-- **2.2 hotspot** closes if the dashboard loaded from the phone at the field.
+- **2.2 hotspot** — **most of it validated 2026-08-07** (router off, Ethernet down: Pi ran on
+  hotspot alone, dashboard HTTP 200 by IP `172.20.10.2` and by `apogee-gs.local`, sled RX
+  continued, 0 loss). **Its acceptance clause — cold-boot rejoin — is STILL OPEN**: the
+  association was forced with `nmcli connection up`, so nothing proves unattended rejoin on
+  boot. Closing the epic on the forced test would be the claiming-coverage-we-lack pattern
+  this file already calls out at the Epic 2 row.
 
 ### Increment 2 (`worktree-agent-a7e6e458b1b6637a5`, `9759989`) — NOT FLOWN, NOT COMPLETE
 Per-axis accel as additive v1 tags `Ax`/`Ay`/`Az`. **DO NOT MERGE AS-IS — it has a DEFECT, not

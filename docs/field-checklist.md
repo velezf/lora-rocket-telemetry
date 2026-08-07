@@ -171,7 +171,24 @@ cd ~/lora-rocket-telemetry && ~/gs-venv/bin/python -m ground.clock.attest_clock
 > `rfkill list wifi` (was soft-blocked). Both were off, both persist once set, and neither
 > is visible from "the Wi-Fi doesn't work".
 
+**VALIDATED 2026-08-07 — everything below except cold-boot rejoin.** Router OFF, Ethernet
+down, home Wi-Fi gone: the Pi ran on the hotspot alone and served the dashboard both ways —
+`http://172.20.10.2:8080` HTTP 200 in 0.124 s, and `http://apogee-gs.local:8080` HTTP 200
+(mDNS resolves over the hotspot, so the name is the durable answer and the taped IP is the
+fallback, not the other way round). Sled reception continued throughout, 0 loss.
+**TAPED IP: `172.20.10.2`** — a DHCP lease on a /28, so treat the name as primary.
+
+**How we learned the profile had NEVER worked:** `nmcli -g connection.timestamp connection
+show <profile>` returned **0**. The profile existed, autoconnected, was prioritised, and had
+never once associated — every check short of the timestamp said it was fine. It now reads
+`1786129162`. **Use the timestamp, not the profile's existence, as the evidence.**
+
+**STILL OPEN: cold-boot rejoin**, which is 2.2's actual acceptance clause. The association
+above was forced with `nmcli connection up`; nothing yet proves the Pi rejoins the hotspot
+BY ITSELF on boot with no other network present. Run the step below from a real cold boot.
+
 - [ ] Phone Personal Hotspot **ON**.
+- [ ] **Cold-boot the Pi with the hotspot as the ONLY network** (router off, no Ethernet).
 - [ ] Phone browser → **`http://apogee-gs.local:8080`** (or the taped IP).
 - [ ] **It loads → the Pi is on the hotspot.** The dashboard binds `0.0.0.0`; nothing else needed. **2.2 closed.**
 - [ ] Note the time, and that the OLED already said **`CLK rtc`** *before* the hotspot came up (§2 step 3)

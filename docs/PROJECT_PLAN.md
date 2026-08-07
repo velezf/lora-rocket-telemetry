@@ -109,6 +109,14 @@ Epics 1 and 2 are independent foundations (Mac toolchain vs. Pi bring-up) and ca
 
 ## Epic 5 — 9-DoF integration (LSM6DSOX + LIS3MDL)
 
+> **REDIRECTED 2026-08-08: Epic 5 is now the Teensy 4.1 sled respin — onboard Mahony
+> fusion + microSD flight recorder, gated on F2 flying the 10 Hz Feather build first.**
+> Plan, port-cost audit, hardware list and SD recorder design:
+> [`docs/epic5-teensy-respin.md`](epic5-teensy-respin.md). The closed question that
+> forced onboard fusion (live attitude cannot come from ground-side fusion) is recorded
+> with its arithmetic in `docs/RESUME.md`, "EPIC 5 RE-SCOPED 2026-08-08". The task list
+> below predates the redirect and is kept for the still-valid hardware/cal items.
+
 *Goal: roll rate and orientation in the rocket's flight record, end to end.*
 
 - **5.1** — Hardware: chain the 9-DoF onto the sled's STEMMA QT I²C bus; confirm reads

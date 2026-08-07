@@ -115,6 +115,50 @@ range, resolving the other way, and it ran unattended. Combined with the router-
 priority scheme now have evidence behind them — home 100 wins at home, hotspot 50 with
 infinite retry is the only candidate at the field.
 
+### EPIC 5 RE-SCOPED 2026-08-08 — attitude is ONBOARD or it does not exist live
+
+**CLOSED QUESTION at the head of the epic: live in-flight attitude can never come from
+ground-side fusion.** The arithmetic, recorded with its load-bearing leg named:
+
+Ground-side fusion needs raw gyro+accel at ≥ 50 Hz. At SF7/BW500 (all ToA incl. 4 B RH
+header): ASCII raw frames at 50 Hz = **352 % duty** (impossible); minimal per-sample
+binary (~20 B) = **77 %** (over the 65 % line); realistic per-sample binary (~34 B) =
+**103 %** (over the RF ceiling itself). **Honesty note: duty alone does NOT close the
+question** — batching 5 samples into a 10 Hz binary packet is ~65 B and **32 % duty**,
+comfortably feasible. The question closes on three legs together:
+
+1. **Duty** kills ASCII and per-sample binary outright (numbers above).
+2. **Batching requires binary v2** — the largest contract change in the system, gated
+   behind its own epic per ADR 0005 A1.5, not an incremental option.
+3. **THE LOAD-BEARING LEG — integrator integrity, which holds at ANY encoding.** Attitude
+   is an integration, and ground-side fusion integrates a lossy RF link: every tumble
+   fade punches a hole in the input stream and the solution diverges at every gap, during
+   exactly the dynamics it exists to capture. Onboard integration has a loss-free input
+   by construction. No transport fixes this; it is structural.
+
+**Therefore: attitude is computed ONBOARD and the solution is transmitted, or it doesn't
+exist live.** Spin SPECTRA stay impossible live at any encoding — that path is onboard
+log + post-flight dump (C2): noted, PARKED.
+
+**DIRECTION DECISION, same day (supersedes 5.b/5.c of the morning's list): Epic 5 is the
+TEENSY 4.1 SLED RESPIN — onboard fusion + SD flight recorder.** Full plan, port-cost
+audit, hardware list, SD recorder sketch and not-in-scope list:
+[`docs/epic5-teensy-respin.md`](epic5-teensy-respin.md) — cite it, don't restate it.
+The morning's 5.c measurement gate (SAMD21 soft-float Mahony) is **MOOT** — the M7+FPU
+is the decision. **5.a** (ground cal from E+F pad frames — the pad frame IS the
+calibration dataset), **5.d** (mag excluded in flight, yaw drift quantified from 5.a)
+and **5.e** (attitude replaces fields; over-65 % duty = forcing function #4 → binary
+epic) **stand unchanged** and are restated normatively in the plan doc. C2's
+join/provenance analysis carries over VERBATIM as the SD integration design (see plan
+doc §3; C2 entry below stays the authority). Spin spectra: post-recovery product off
+the card at full sample rate.
+
+**SEQUENCING, FIRM: the 10 Hz rewrite finishes and FLIES on the Feather first (F2).
+Teensy work begins after F2.** No MCU respin stacks onto an unflown RF rewrite — two
+revolutions with no flight between them means unattributable failures.
+
+No implementation now — recorded 2026-08-08.
+
 ### CORRECTION — the 59 ms/sample causal story below is WRONG
 
 The section below attributes ~59 ms/sample to BMP390 conversion. The arithmetic is right and
@@ -695,7 +739,7 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 **`v1.0-portfolio-genesis` in THIS repo at `42eacb5`** (moved off the site repo 2026-08-01 —
 see "Where the tag lives"). **Verified end to end, not merely built** — see the two-proof
 method below. |
-| 5 — 9-DoF integration | 🟡 **5.1 hardware evidence done** (LSM6DSOX 0x6a + LIS3MDL 0x1c on the sled bus; WHO_AM_I 0x6C/0x3D; sane gyro/mag). 5.2–5.4 not started; `Roll`/`Spin` reserved (ADR 0001 App. A). |
+| 5 — TEENSY 4.1 SLED RESPIN (onboard fusion + SD recorder) | 🟡 **PLANNED — [`docs/epic5-teensy-respin.md`](epic5-teensy-respin.md)**; closed question (attitude is onboard or not live) + arithmetic in "EPIC 5 RE-SCOPED" above. Gated on F2 flying first. 5.1 hardware evidence done (LSM6DSOX 0x6a + LIS3MDL 0x1c; WHO_AM_I 0x6C/0x3D); raw channels reach the wire via the E+F pad frame (ADR 0005 A1.3). `Roll`/`Spin` stay reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
 | 8 — Kids' handheld | 🟡 **8.1 platform groundwork merged** (PR #1, `handheld/`). Bench bring-up pending PiSugar 3 + SRH805S antenna (both ordered). 8.2–8.5 not started. |

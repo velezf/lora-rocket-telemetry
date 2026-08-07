@@ -35,7 +35,7 @@ reverts**, `St:0` throughout. 45/45 native tests green.
 
 ### BUILD ORDER — run in this sequence, each gated by Frank
 
-1. **`ground/baseline.py WINDOW=15` → time-based.** A *sample* count calibrated in *seconds*;
+1. **`ground/flights/baseline.py` `WINDOW=15` → time-based.** A *sample* count calibrated in *seconds*;
    at 10 Hz the AGL baseline silently locks on 1.5 s instead of 15 s. **Mandatory before any
    rate change.** Ground-side, host-testable, no hardware.
 2. **`encode_packet` truncation LOUD + buffer 128 → 192.** Verified defect: on overflow it

@@ -25,9 +25,14 @@ Phone-readable. Cold hands. No laptop. **Save this page offline before leaving.*
 - [ ] **Back up the ops journal off the SD:** `~/apogee-data/ops-journal.jsonl`. Only irreplaceable file in the system.
 - [ ] **Join the Pi to the phone hotspot once, at home. Write its IP on tape on the box.**
       (`apogee-gs.local` usually resolves over the hotspot; the taped IP is the fallback.)
-- [ ] **Antennas screwed on at BOTH ends — box and sled.**
-      **Never power the sled without its antenna.** It transmits at 23 dBm; an open port can kill the PA.
-      Same for the Pi radio.
+- [ ] **Antennas: the two ends have OPPOSITE rules. Know which is which.**
+      **SLED — never power it without its antenna.** It transmits; an open port can kill the PA.
+      **GROUND STATION — safe to power without one.** The Pi radio is **RX-only by
+      architecture**, not by convention: `ground/rx/sx127x.py` defines only `SLEEP`/`STDBY`/
+      `RXCONT` opmodes, TX mode (0x03) appears nowhere in `ground/`, no `send`/`transmit`
+      function exists, and no PA/output-power register is ever written. Verified 2026-08-06.
+      This is what allows bench work to continue while a pigtail is on order — the sled
+      still needs its antenna at all times.
 - [ ] Pi repo tree clean: `git status --porcelain` empty.
 
 ### Bring
@@ -152,7 +157,66 @@ cd ~/lora-rocket-telemetry && ~/gs-venv/bin/python -m ground.clock.attest_clock
 
 ## 5. Hotspot check — closes 2.2, no laptop needed
 
+> ### LID OFF. IT IS A WI-FI RULE AS WELL AS A THERMAL ONE.
+> The Pi 5's built-in Wi-Fi is **inside the metal box** and **cannot take an external
+> antenna** — unlike the LoRa radio, there is no connector for one. A closed lid shields it
+> and the hotspot link dies, which looks exactly like "the dashboard is broken".
+> **LID OFF = WI-FI WORKS.** It was already the thermal rule (open airflow over the passive
+> heatsinks); it is now also the connectivity rule, and the same action satisfies both.
+> If the box is ever sealed: vent holes **and** a USB Wi-Fi dongle with an external antenna.
+>
+> **Shielding is not the first thing to suspect at home.** Measured 2026-08-06 with
+> everything mounted in the box: the home AP scanned at **signal 100**. If Wi-Fi is missing,
+> check the two software switches FIRST — `nmcli radio wifi` (was `disabled`) and
+> `rfkill list wifi` (was soft-blocked). Both were off, both persist once set, and neither
+> is visible from "the Wi-Fi doesn't work".
+
+**VALIDATED 2026-08-07 — everything below except cold-boot rejoin.** Router OFF, Ethernet
+down, home Wi-Fi gone: the Pi ran on the hotspot alone and served the dashboard both ways —
+`http://172.20.10.2:8080` HTTP 200 in 0.124 s, and `http://apogee-gs.local:8080` HTTP 200
+(mDNS resolves over the hotspot, so the name is the durable answer and the taped IP is the
+fallback, not the other way round). Sled reception continued throughout, 0 loss.
+**TAPED IP: `172.20.10.2`** — a DHCP lease on a /28, so treat the name as primary.
+
+### STANDARD SAVED-NETWORK VERIFICATION — run this on any Wi-Fi the box must join alone
+
+A profile that `nmcli connection show` reports as healthy can still never connect
+unattended. Four fields decide it, and three of them fail SILENTLY:
+
+```
+sudo nmcli -g connection.permissions,802-11-wireless-security.psk-flags,\
+              connection.autoconnect,connection.timestamp \
+     connection show "<profile>"
+```
+
+| field | required | why it fails silently otherwise |
+|---|---|---|
+| `connection.permissions` | **EMPTY** | non-empty = user-scoped: it connects only while THAT USER IS LOGGED IN. At boot nobody is. |
+| `802-11-wireless-security.psk-flags` | **0** | 0 = password stored in the profile. 1 = "ask an agent" — and there is no agent at boot. |
+| `connection.autoconnect` | **yes** | with `autoconnect-retries 0` for infinite retry |
+| `connection.timestamp` | **NON-ZERO, and advancing** | **0 means it has never once associated.** Existence, priority and a plausible password all still read fine. |
+
+**The timestamp is the only one of the four that can prove the profile has actually worked.**
+The rest describe intent; the timestamp describes history.
+
+**How we learned the profile had NEVER worked:** `nmcli -g connection.timestamp connection
+show <profile>` returned **0**. The profile existed, autoconnected, was prioritised, and had
+never once associated — every check short of the timestamp said it was fine. It now reads
+`1786129162`. **Use the timestamp, not the profile's existence, as the evidence.**
+
+**2.2 CLOSED 2026-08-07 on this evidence.** One edge is untested and named rather than
+hidden: the association was forced with `nmcli connection up`, so unattended rejoin on a
+cold boot has not been observed. Closed anyway, deliberately — **the hotspot is a
+CONVENIENCE path, not a DATA path.** If it fails at the pad nothing is lost: ingest keeps
+capturing, the panel LEDs keep reporting, the OLED keeps showing flight state. The dashboard
+is the one surface whose absence costs nothing that matters, which is what makes the
+remaining risk acceptable rather than merely unlikely.
+**If the page does not load in the field, it is not a go/no-go input** — check `G_ALIVE`
+and fly.
+
 - [ ] Phone Personal Hotspot **ON**.
+- [ ] Pi on the hotspot (it autoconnects; priority 50, infinite retry). First cold boot in
+      the field doubles as the rejoin observation — **note the result, do not gate on it.**
 - [ ] Phone browser → **`http://apogee-gs.local:8080`** (or the taped IP).
 - [ ] **It loads → the Pi is on the hotspot.** The dashboard binds `0.0.0.0`; nothing else needed. **2.2 closed.**
 - [ ] Note the time, and that the OLED already said **`CLK rtc`** *before* the hotspot came up (§2 step 3)

@@ -18,7 +18,7 @@ DONE and merged to main (do NOT re-plan these):
 - Epic 1 (PlatformIO/Mac): done; 1.4 upload path proven on the real Feather M0.
 - Epic 2 (Pi 5 ground station): done — peripherals wired (radio SPI0/CE1, OLED I²C 0x3d,
   PiSugar, 6 panel LEDs), native RX driver ground/rx/sx127x.py (raw spidev+lgpio,
-  host-tested), 2.6 low-battery shutdown configured. Only 2.2 hotspot field test (physical) left.
+  host-tested), 2.6 low-battery shutdown configured. **2.2 hotspot CLOSED 2026-08-07** (validated router-off on hotspot alone; cold-boot rejoin unobserved and closed on the convenience-not-data-path argument). **Epic 2 fully closed.**
 - Epic 3 (sled TX + contract): COMPLETE. ADR 0001 = locked packet format. firmware/lib/ has
   host-tested pure units (packet encoder, launch, apogee, conversions). firmware/src/main.cpp
   emits ADR v1 (V:1 SYS:7 SRC:1 SEQ:.. St:.. ALT:..ft ...); B4/B5 (SYS/SRC, SEQ/St) folded in.

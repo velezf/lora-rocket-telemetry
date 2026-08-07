@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: **2026-07-31** (Claude, on Mac + Pi 5). **This session: `feat/panel-leds` MERGED and
+_Last updated: **2026-08-07** (Claude, on Mac + Pi 5). See HANDOFF below for the live state. Earlier context: **This session: `feat/panel-leds` MERGED and
 pushed** — the six-LED supervisor is live and enabled for boot on `apogee-gs`. Also landed three
 pieces of process that outlive the branch: the **sanctioned deploy path**, the canonical
 **"designed but INERT"** register, and **"cite, don't restate"**. Repo-wide **branch cleanup**
@@ -16,6 +16,116 @@ cleanly); **OLED rewire verified** (the "dark" was a no-idle-page firmware gap, 
 logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor shell/unit — see
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
+
+## HANDOFF — 2026-08-07, start of the 10 Hz build session
+
+**NOTHING FLEW ON 2026-08-06.** The section below is titled "FLIGHT DAY" and describes a
+bench-verified build; read it as *what was prepared*, not what was flown. The flight is
+pigtail-gated (see DEFERRED).
+
+**ON `main` NOW:** the launch **confirm-or-revert** gate (merged 2026-08-06) — altitude
+confirms the launch, the accel gate only decides when to start watching, and both permanent
+latches are closed (`max_provisional_ms` bounds PROVISIONAL from first entry). Flashed and
+bench-clean: SEQ 112→157, 0 discontinuities, **RATE 17.00 Hz**, 0 baro failures, **0 launch
+reverts**, `St:0` throughout. 45/45 native tests green.
+
+**DECIDED, NOT BUILT:** [ADR 0005](adr/0005-telemetry-rate-and-rf-configuration.md) —
+**10 Hz at SF7/BW500/17 dBm**, ACCEPTED, its §8 RX-turn gate measured and passed
+(worst turn **25.65 ms** against a 100 ms budget, ~3.9x margin).
+
+### BUILD ORDER — run in this sequence, each gated by Frank
+
+1. **`ground/baseline.py WINDOW=15` → time-based.** A *sample* count calibrated in *seconds*;
+   at 10 Hz the AGL baseline silently locks on 1.5 s instead of 15 s. **Mandatory before any
+   rate change.** Ground-side, host-testable, no hardware.
+2. **`encode_packet` truncation LOUD + buffer 128 → 192.** Verified defect: on overflow it
+   returns `out_len-1`, a valid-looking length, and the fragment is transmitted. A frame cut
+   at 105 B decodes as a **valid packet with `MET:6` where the truth is 65535** — no counter
+   moves. Record the range assumptions beside the number (§4 of the ADR).
+3. **BMP390 temperature oversampling 8x → 1x** (NOT off — pressure compensation needs the
+   term). **Measure the achieved rate; do not assume the gain.**
+4. **Non-blocking TX.** Fire and poll; **`isSending()` does NOT exist on `RH_RF95`** — use
+   `mode()`. On skip, **`seq` must NOT increment** or a sled scheduling decision publishes as
+   RF loss. Guard the unbounded `waitPacketSent()` hang with a watchdog.
+5. **`Vel` + G envelope (`Gmx`/`Gmn`).** Onboard dh/dt with light smoothing; envelope reset
+   per TX window, tested. New worst case **139 B**.
+6. **Both-ends BW500.** A **both-ends constant** whose failure mode is *silent total link
+   loss*. One authority, cited — never copied.
+7. **St-dependent 10 Hz** — 1 Hz on pad, 10 Hz in flight. **Bound it**: the flight states
+   latch and there is no `St:3`, so "fast while `St != 0`" never turns off and would transmit
+   until the battery died. MET-bounded window.
+
+### RED TEAM BEFORE ANYTHING FLASHES
+
+A Fable 5 agent reviews the **actual diff**, adversarially, and **reports without fixing**.
+Brief it with this project's own failure taxonomy — every one of these shipped here:
+hollow guards (a check that cannot fail, or that never ran); **a test derived from the same
+assumption as the implementation**; **a test asserting a proxy for the property**; sentinel
+colliding with a legal value; latches with no bounded exit; silent truncation or field loss;
+restated facts that disagree with their source; evidence that does not describe the artifact
+that will fly. Its specific hunting grounds here: the **both-ends BW constant**, the
+**envelope reset logic**, and whether the **RX-turn measurement** actually covers 10 Hz.
+
+### BENCH SCOPE — bench range only, and say so
+
+The 10 Hz sustained bench runs **antenna-less at arm's length** (the link decodes fine there;
+measured **−80/−81 dBm**). Report **loss** and **FIFO-overwrite** counts. This validates the
+sled, the loop and the ground pipeline. **It does not validate the RF path.**
+
+### DEFERRED — all pigtail-gated, do not attempt
+
+- **Field-range link margin.** ADR 0005 §2's ~42 dB is a *design assumption*, unvalidated.
+- **u.FL continuity check** — centre pin NOT shorted to shield, before the new pigtail is
+  trusted. The connector was re-soldered 2026-08-06.
+- **RSSI validation of the repair** — close range back in the **−38 to −14 dBm** band.
+  Antenna-less "before" evidence: session `session-20260806T174610Z-4d657e`, 1,724 packets.
+- **The flight itself.**
+
+Until then: **any weak-RSSI symptom is the connector until proven otherwise.**
+
+### RESOLVED 2026-08-07 — why Wi-Fi profiles appear to come and go
+
+**Two profiles, two persistence mechanisms, and only one of them is durable in place.**
+
+- `iphone17-hotspot` is a **native NetworkManager profile** in
+  `/etc/NetworkManager/system-connections/`. It is edited in place and nothing regenerates it.
+- `netplan-wlan0-WideRoad` is **netplan-rendered**: the truth lives in
+  `/etc/netplan/90-NM-dd86560a-*.yaml` and is rebuilt into `/run/NetworkManager/system-connections/`
+  **on every boot**. Anything in `/run` is disposable by design, so a netplan change rewrites
+  that set wholesale.
+
+That is the mechanism, and it is observed, not guessed. **Two honest limits on the claim:**
+(a) the original "all profiles are gone" report was partly MY ERROR — the hotspot profile was
+there the whole time and a broken grep (`wifi` against a field reading `802-11-wireless`)
+could not see it; (b) whether a *home* profile ever existed before 2026-08-07 is unknown, so
+netplan regeneration is a well-supported EXPLANATION for a disappearance, not an observed
+cause of one. The durable practical consequence stands either way: **edits to a
+netplan-rendered profile are not safe from netplan; edits to a native NM profile are.**
+
+The actual cause of "no Wi-Fi" on 2026-08-06 was neither: `nmcli radio wifi` was **disabled**
+(an NM-level switch independent of rfkill) *and* `rfkill` had `phy0` **soft-blocked**. Both
+were invisible from the symptom, and both persist once set.
+
+### FIELD FALLBACK — direction two confirmed, unattended
+
+When the router came back up on 2026-08-07 the Pi moved **hotspot → WideRoad on priority with
+no input at all**. That is the same autoconnect machinery that must pick the hotspot up at the
+range, resolving the other way, and it ran unattended. Combined with the router-off validation
+(ran on hotspot alone, dashboard served, sled RX lossless), both directions of the
+priority scheme now have evidence behind them — home 100 wins at home, hotspot 50 with
+infinite retry is the only candidate at the field.
+
+### CORRECTION — the 59 ms/sample causal story below is WRONG
+
+The section below attributes ~59 ms/sample to BMP390 conversion. The arithmetic is right and
+**the causation is not**: `performReading()` does not wait for the conversion (no data-ready
+poll), so 25 + 1.35 ≈ 26 ms, not 59. **The missing ~33 ms is `rf95.waitPacketSent()`
+busy-waiting ~159 ms of air time once per second.** Two agents reached this independently.
+Consequence: **the temperature-oversampling change is not a sample-rate fix** (and its saving
+is 14.14 ms, not 16.3 — `temp_en` is set unconditionally); it is the *precondition* for any
+tick below 25 ms. **Non-blocking TX is what actually raises the rate** — zero the TX block and
+the loop returns ~20 Hz. Change the justification, or the next person measures no improvement
+and thinks something broke.
 
 ## FLIGHT DAY 2026-08-06 — what was flown, and what is waiting
 
@@ -41,7 +151,14 @@ barometer sanity signal; do not over-read it, pressure varies day to day.)
 - **The OLED trend strip becomes DECIDABLE.** Criterion already recorded: rising ramp through
   boost and coast, flatten at apogee, shallow steady decline under chute, autoscaled. A flat
   smear during descent means the autoscale is not earning its 10 px and the strip should be cut.
-- **2.2 hotspot** closes if the dashboard loaded from the phone at the field.
+- **2.2 hotspot** — **most of it validated 2026-08-07** (router off, Ethernet down: Pi ran on
+  hotspot alone, dashboard HTTP 200 by IP `172.20.10.2` and by `apogee-gs.local`, sled RX
+  continued, 0 loss). **Its acceptance clause — cold-boot rejoin — is STILL OPEN**: the
+  association was forced with `nmcli connection up`, so nothing proves unattended rejoin on
+  boot. **CLOSED anyway 2026-08-07, on a risk argument rather than full coverage:** the
+  hotspot is a CONVENIENCE path, not a DATA path — if it fails at the pad, capture, the panel
+  LEDs and the OLED are all unaffected, so the untested edge cannot cost flight data. The
+  first field cold boot is the rejoin observation; it is noted, not gated on.
 
 ### Increment 2 (`worktree-agent-a7e6e458b1b6637a5`, `9759989`) — NOT FLOWN, NOT COMPLETE
 Per-axis accel as additive v1 tags `Ax`/`Ay`/`Az`. **DO NOT MERGE AS-IS — it has a DEFECT, not
@@ -571,7 +688,7 @@ is in `spi`/`i2c`/`gpio` groups; `i2cdetect` is in `/usr/sbin`. **Authoritative 
 | Epic | Status |
 |------|--------|
 | 1 — PlatformIO dev env (Mac) | ✅ **Done.** 1.1–1.3 + **1.4 upload smoke proven** on the Feather M0 (SAM-BA upload + serial heartbeat). |
-| 2 — Pi 5 ground-station bring-up | ✅ **CLOSED except 2.2 field verification.** (2.2's own acceptance clause is "verify cold-boot rejoin" and the hotspot field test is still open — calling the epic closed while its acceptance clause is unverified is the same claiming-coverage-we-lack pattern removed from the panel docs 2026-07-31.) **2.5 deviates from the plan BY DESIGN** — raw `spidev`+`lgpio`, not Blinka/`adafruit_rfm9x` (ADR 0002); plan text reconciled 2026-07-31. OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
+| 2 — Pi 5 ground-station bring-up | ✅ **CLOSED 2026-08-07, 2.2 included.** (2.2 validated router-off/Ethernet-down on hotspot alone — dashboard HTTP 200 by IP and by mDNS name, sled RX lossless throughout. Its "cold-boot rejoin" clause was NOT observed — association was forced — and is closed on the risk argument that the hotspot is a convenience path, not a data path: its failure costs no flight data. Named, not hidden.) (2.2's own acceptance clause is "verify cold-boot rejoin" and the hotspot field test is still open — calling the epic closed while its acceptance clause is unverified is the same claiming-coverage-we-lack pattern removed from the panel docs 2026-07-31.) **2.5 deviates from the plan BY DESIGN** — raw `spidev`+`lgpio`, not Blinka/`adafruit_rfm9x` (ADR 0002); plan text reconciled 2026-07-31. OS/SSH/Wi-Fi/Claude Code/deploy-key clone; radio SPI0/CE1, OLED 0x3d, PiSugar batt+RTC, **6 panel LEDs (per-position map probed 2026-07-31)**; **2.5 RX driver** (`ground/rx/`); **2.6 low-battery auto-shutdown** (+ wake-on-charge complement). **2.2 hotspot fallback field test** carried as the single open **physical validation** (deferred, not blocking — same pattern as the overnight cold-boot item; run post-merge, doubling as the marker-vs-NTP clock check); panel-LED *functions* → Epic 4. |
 | 3 — Sled TX firmware + contract | ✅ **Complete.** ADR 0001 locked; encoder/launch/apogee/conversions as host-tested `lib/` units; `src/main.cpp` emits **ADR v1** (`V:1 SYS:7 SRC:1 …`) with live SYS/SRC/SEQ/St/MET (**B4/B5 folded into the integration commit**); **e2e verified** — sled→Pi driver, **22/22 ADR-OK**, 0 CRC errors. |
 | 4 — Ground service (decode/log/dash/web/OLED) | ✅ **CLOSED 2026-08-01.** 4.1–4.5 done; 4.6 functionally done for `SRC:1` on the bench (three clauses deferred, below); 4.7 optional, not started. 4.1 decoder (`ground/decode/`); 4.2 **ingest** (`ground/ingest/` + `apogee-ingest.service` — radio owner → JSONL log + `LinkStats` + foreign-SYS/unknown-SRC + Part-97 callsign audit); 4.3 **flight logging** (`ground/flights/` — journal segmentation, multi-bird, export, CLI; index = f(session, ops)); **4.4 dashboard** (Flask + Chart.js, immutable snapshots, density pass) + **4.6 OLED** (`luma.oled` `0x3d`) on a per-SRC **AGL pad baseline**, both bench-verified live and **flown once** (`2026-07-08-F1`, real-RF golden fixture). **AGL baseline v2** merged: pure `pad_baseline()` (stability-gated trailing window) shared by live + derive — the zero **locks at flight_open**, unlocks at close, and `baseline_ft`+`baseline_n` are stored per flight in the index (auditable, reproduces on rebuild). Full ground suite **221 tests** (incl. `feat/rtc-boot-restore` + `feat/panel-leds`). **4.6 is NOT done as specified** (re-marked 2026-07-31): three plan clauses are deferred — **multi-node `SRC:2` display → Epic 7** (no lander exists), **"reuses the handheld's OLED rendering" → Epic 8** (no shared module exists), **"cut a window in the front panel" → enclosure** (still benchtop, not boxed). The clause that IS implemented — "driven straight off each decoded packet" — specifies the defect (render on the RX thread, no idle page) and was amended in the plan. **4.5 DONE 2026-08-01** — the archive is live at
 `velezf.github.io/projects/lora-flights.html`, published on F1 alone and tagged
@@ -694,7 +811,8 @@ Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + A
       _Criterion (1) — PiSugar RTC hold — satisfied free by the hiatus:_ the RTC kept correct
       wall-clock across a **~13-day fully-powered-off** span at 69 % with no drain (read back
       `2026-07-27T10:45:47-04:00` on power-up); the 30-min hold test need not be re-run.
-- [ ] **2.2 hotspot field test — PARKED: AWAITING A FIELD TRIP (named state, rule 7).** Away from
+- [x] **2.2 hotspot field test — CLOSED 2026-08-07** (validated at home with the router OFF,
+      which removed the need for the field trip: no home infrastructure was in play). Away from
       home Wi-Fi, confirm fallback to the iPhone hotspot. **The last item of ORIGINAL Epic 1-4
       scope still open.** Not blocked on any code and not blocking anything — it needs physical
       absence from the home network, so it cannot be closed at the bench by any amount of work.

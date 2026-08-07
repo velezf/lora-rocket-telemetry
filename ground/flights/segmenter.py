@@ -25,11 +25,10 @@ beacon; it is counted in `beacons_rx` and takes no other part in the flight.
 `is_telemetry` below is the single definition and carries the rationale.
 """
 from ground.flights.flights import Flight, next_flight_id
-from ground.flights.baseline import pad_baseline, WINDOW, EXCLUDE_TAIL
+from ground.flights.baseline import pad_baseline, trim_history
 
 ST_PAD = 0     # ADR 0001 St codes: 0 pad / 1 ascent / 2 descent
 ST_ASCENT = 1
-_HIST_LEN = WINDOW + EXCLUDE_TAIL   # trailing ALT retained per SRC for the baseline
 
 
 def _extend(cur, val, fn):
@@ -108,7 +107,7 @@ class FlightSegmenter:
         self.silence_timeout_s = silence_timeout_s
         self._open = {}        # src -> working flight state
         self._ids = []         # every flight id ever assigned (next_flight_id + no reuse)
-        self._alt_hist = {}    # src -> recent ALT (pre-boost window feeds the AGL baseline)
+        self._alt_hist = {}    # src -> recent (t, ALT) (pre-boost window feeds the AGL baseline)
 
     def open_srcs(self):
         return list(self._open.keys())
@@ -116,12 +115,12 @@ class FlightSegmenter:
     def open_flight_ids(self):
         return {src: fl["flight_id"] for src, fl in self._open.items()}
 
-    def _push_alt(self, src, alt):
+    def _push_alt(self, src, t, alt):
         if alt is None:
             return                  # a frame with no ALT is not a pad sample
         buf = self._alt_hist.setdefault(src, [])
-        buf.append(alt)
-        del buf[:-_HIST_LEN]        # keep only the trailing window
+        buf.append((t, alt))
+        buf[:] = trim_history(buf)  # keep only the trailing time window (any rate)
 
     def _start(self, received_at, t, src, peak, rssi, seq, packets):
         fid = next_flight_id(received_at[:10], self._ids)
@@ -167,9 +166,9 @@ class FlightSegmenter:
             if st == ST_ASCENT:
                 peak = max(peak_in) if peak_in else None
                 fid = self._start(received_at, t, src, peak, rssi, seq, packets=1)  # -> new flight_id
-                self._push_alt(src, alt)
+                self._push_alt(src, t, alt)
                 return fid
-            self._push_alt(src, alt)   # pad packet -> baseline history
+            self._push_alt(src, t, alt)   # pad packet -> baseline history
             return None  # pad packets (or descent w/o prior ascent) don't open a flight
 
         # --- compute, then commit: nothing below can leave the flight half-updated ---
@@ -187,7 +186,7 @@ class FlightSegmenter:
         fl.update(t_end_iso=received_at, t_end=t, packets=fl["packets"] + 1,
                   peak_alt=peak, rssi_min=rssi_min, rssi_max=rssi_max,
                   gaps=gaps, last_seq=last_seq)
-        self._push_alt(src, alt)
+        self._push_alt(src, t, alt)
 
     def check_timeouts(self, t, protect=frozenset()):
         """Close flights silent longer than the timeout, except SRCs in `protect`

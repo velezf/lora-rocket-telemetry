@@ -62,9 +62,17 @@ class TestF1Golden(unittest.TestCase):
             # dict and was deliberately not touched.
             "beacons_rx": 0,
             "rssi_min": -38, "rssi_max": -14,
-            # v2 AGL zero, recomputed retrospectively from the 19 quiet pre-boost pad
+            # v2 AGL zero, recomputed retrospectively from the quiet pre-boost pad
             # packets (SEQ 0-18, ALT -83..-85): peak AGL = -74 - (-84) = 10 ft (noise).
-            "baseline_ft": -84, "baseline_n": 15,
+            #
+            # INTERFACE CHANGE, 2026-08-07: baseline_n 15 -> 13 when the baseline
+            # window became TIME-based (ADR 0005 §7; ground/flights/baseline.py).
+            # F1's real ground rate was ~0.85 Hz (packets ~1.17 s apart), so the
+            # old "15 samples" actually spanned ~17.5 s of pad; an honest 15 s
+            # window over the same fixture holds 13 samples. baseline_ft is
+            # UNCHANGED at -84 — n is a diagnostic count and now scales with the
+            # true packet rate. Every other number is byte-identical.
+            "baseline_ft": -84, "baseline_n": 13,
         })
 
     def test_pad_max_sentinel_is_real_in_this_fixture(self):

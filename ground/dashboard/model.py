@@ -22,11 +22,10 @@ ids + health. No Flask, no HTTP, no clock — host-tested.
 import json
 from collections import deque
 
-from ground.flights.baseline import pad_baseline, WINDOW, EXCLUDE_TAIL
+from ground.flights.baseline import pad_baseline, trim_history
 from ground.flights.segmenter import max_is_meaningful
 
 _STATE_NAMES = {0: "pad", 1: "ascent", 2: "descent"}
-_HIST_LEN = WINDOW + EXCLUDE_TAIL     # enough trailing ALT for one baseline compute
 
 
 class EventsRing:
@@ -76,7 +75,10 @@ class LiveState:
         # (the current boost packet is appended only after this decision).
         if in_flight and locked is None:
             locked, _ = pad_baseline(list(hist))
-        new_hist = (hist + (alt,))[-_HIST_LEN:]
+        # History is (t, alt) pairs on obs.mono — the baseline window is wall-clock
+        # TIME (ground.flights.baseline), so it is the same 15 s at any packet rate.
+        # A frame with no ALT contributes no pad sample (same rule as the segmenter).
+        new_hist = hist if alt is None else tuple(trim_history(hist + ((obs.mono, alt),)))
         if st is None:
             # NO `St` = NO INFORMATION about flight state — never "not in flight".
             # A Part-97 CALL beacon (required every 10 min) carries no St; reading

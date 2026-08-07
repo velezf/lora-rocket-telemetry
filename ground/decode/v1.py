@@ -28,6 +28,20 @@ _V1_TAGS = {
     "T": ("float", "C"),
     "Batt": ("float", "V"),
     "MET": ("int", None),
+    # --- additive tags, 2026-08-08 (E+F frame shapes; pending ADR 0001 rows) ---
+    # All unitless floats, mirroring G/Pg. FLIGHT frames add Vel/Gmx/Gmn/Wmx;
+    # PAD frames add Vel/Gmx/Gmn plus the raw 9-DoF channels. Missing tags stay
+    # legal per ADR 0001, so today's 12-tag frames decode unchanged.
+    "Vel": ("float", None),   # onboard vertical velocity, ft/s (+/-1999.9)
+    "Gmx": ("float", None),   # TX-window max accel magnitude, g (0-199.9)
+    "Gmn": ("float", None),   # TX-window min accel magnitude, g
+    "Wmx": ("float", None),   # TX-window max gyro magnitude, dps (+/-2293.8 FS)
+    "Gyx": ("float", None),   # raw gyro X, dps (pad frames)
+    "Gyy": ("float", None),   # raw gyro Y, dps
+    "Gyz": ("float", None),   # raw gyro Z, dps
+    "Mgx": ("float", None),   # raw mag X, uT (+/-478.9 FS; pad frames)
+    "Mgy": ("float", None),   # raw mag Y, uT
+    "Mgz": ("float", None),   # raw mag Z, uT
 }
 
 

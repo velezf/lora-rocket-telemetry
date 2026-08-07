@@ -25,9 +25,14 @@ Phone-readable. Cold hands. No laptop. **Save this page offline before leaving.*
 - [ ] **Back up the ops journal off the SD:** `~/apogee-data/ops-journal.jsonl`. Only irreplaceable file in the system.
 - [ ] **Join the Pi to the phone hotspot once, at home. Write its IP on tape on the box.**
       (`apogee-gs.local` usually resolves over the hotspot; the taped IP is the fallback.)
-- [ ] **Antennas screwed on at BOTH ends — box and sled.**
-      **Never power the sled without its antenna.** It transmits at 23 dBm; an open port can kill the PA.
-      Same for the Pi radio.
+- [ ] **Antennas: the two ends have OPPOSITE rules. Know which is which.**
+      **SLED — never power it without its antenna.** It transmits; an open port can kill the PA.
+      **GROUND STATION — safe to power without one.** The Pi radio is **RX-only by
+      architecture**, not by convention: `ground/rx/sx127x.py` defines only `SLEEP`/`STDBY`/
+      `RXCONT` opmodes, TX mode (0x03) appears nowhere in `ground/`, no `send`/`transmit`
+      function exists, and no PA/output-power register is ever written. Verified 2026-08-06.
+      This is what allows bench work to continue while a pigtail is on order — the sled
+      still needs its antenna at all times.
 - [ ] Pi repo tree clean: `git status --porcelain` empty.
 
 ### Bring
@@ -151,6 +156,20 @@ cd ~/lora-rocket-telemetry && ~/gs-venv/bin/python -m ground.clock.attest_clock
 ---
 
 ## 5. Hotspot check — closes 2.2, no laptop needed
+
+> ### LID OFF. IT IS A WI-FI RULE AS WELL AS A THERMAL ONE.
+> The Pi 5's built-in Wi-Fi is **inside the metal box** and **cannot take an external
+> antenna** — unlike the LoRa radio, there is no connector for one. A closed lid shields it
+> and the hotspot link dies, which looks exactly like "the dashboard is broken".
+> **LID OFF = WI-FI WORKS.** It was already the thermal rule (open airflow over the passive
+> heatsinks); it is now also the connectivity rule, and the same action satisfies both.
+> If the box is ever sealed: vent holes **and** a USB Wi-Fi dongle with an external antenna.
+>
+> **Shielding is not the first thing to suspect at home.** Measured 2026-08-06 with
+> everything mounted in the box: the home AP scanned at **signal 100**. If Wi-Fi is missing,
+> check the two software switches FIRST — `nmcli radio wifi` (was `disabled`) and
+> `rfkill list wifi` (was soft-blocked). Both were off, both persist once set, and neither
+> is visible from "the Wi-Fi doesn't work".
 
 - [ ] Phone Personal Hotspot **ON**.
 - [ ] Phone browser → **`http://apogee-gs.local:8080`** (or the taped IP).

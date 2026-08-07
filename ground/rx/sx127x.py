@@ -61,9 +61,16 @@ _BW_CODES = {
 
 @dataclass
 class LoRaConfig:
-    """Modem configuration. Defaults mirror the sled's RadioHead Bw125Cr45Sf128."""
+    """Modem configuration.
+
+    Bandwidth is a BOTH-ENDS constant whose authority is
+    docs/adr/0005-telemetry-rate-and-rf-configuration.md (§7): the sled must be
+    configured identically, and a mismatch fails as SILENT total link loss — no
+    error, simply no packets. The sled-side cutover is a separate, coordinated
+    change; see that ADR before deploying either end alone.
+    """
     freq_hz: int = 434_000_000
-    bandwidth_khz: float = 125
+    bandwidth_khz: float = 500   # per ADR 0005 — must match the sled (see class docstring)
     spreading_factor: int = 7        # 6..12
     coding_rate: int = 5             # denominator of 4/N: 5..8
     sync_word: int = 0x12            # private-network default (RH + adafruit)

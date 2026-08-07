@@ -131,9 +131,10 @@ Worst case, **with the range assumptions recorded** — the absence of which cau
 | existing 12 tags | — | `ALT` <20000 ft, `Max` <200000 ft, `G`/`Pg` <200.0, `T` <100.0 °C, `Batt` <100.00 V, `SEQ`/`MET` 16-bit |
 | `Vel` | `Vel:-1999.9` | ±1999.9 ft/s (F15 burnout ≈875 ft/s → 2.3× margin) |
 | `Gmx` | `Gmx:199.9` | 0.0–199.9 g |
-| `Gmn` | `Gmn:0.0` | non-negative: magnitude has a floor of 0 |
+| `Gmn` | `Gmn:199.9` | 0.0–199.9 g; **worst FORM is the longest, not the value floor** (corrected, Amendment 1) |
 
-**109 B today → 139 B.** Buffer raised **128 → 192** (53 B headroom; hard cap 251 =
+**109 B today → 141 B** (corrected from 139, Amendment 1). Buffer sizing superseded by
+Amendment 1: **`char msg[256]`**, sized to the largest frame (hard cap 251 =
 `RH_RF95_MAX_MESSAGE_LEN`, above which `send()` transmits nothing).
 
 ## 5. Why not subcadence
@@ -239,3 +240,103 @@ removes the polling constraint entirely and is the better long-term answer.
 | Ground-derived velocity | Rejected — differentiating 10 Hz `ALT` yields noise (§4) |
 | **10 Hz @ SF7/BW500/17 dBm** | **Decided, pending §8** |
 | 5 Hz @ SF7/BW250 | Documented fallback if §8 fails |
+
+---
+
+# Amendment 1 — 2026-08-08: 9-DoF fit, the E+F frame split, and the corrected worst case
+
+**Status:** ACCEPTED (decision by Frank, 2026-08-08). Measured numbers marked *pending
+bench* are completed at build close-out.
+
+## A1.1 Correction to §4 — worst FORM, not value floor
+
+§4 sized `Gmn`'s worst form as `Gmn:0.0` because the value's floor is 0. For buffer and
+ToA sizing the worst form is the **longest** — `Gmn:199.9` (min |g| across a boost window
+is large, not small). The base worst case is therefore **141 B, not 139**. ToA at
+SF7/BW500 is unchanged (58.94 ms) only because payload symbols come in 5-symbol groups
+and the ceiling absorbed the difference — the number was wrong even though the conclusion
+survived, which is why it is corrected rather than waved through.
+
+## A1.2 The 9-DoF fit result that forced a decision
+
+Adding six raw channels (gyro xyz, mag xyz) to the flight frame at 10 Hz:
+
+| variant | bytes | duty @10 Hz |
+|---|---|---|
+| full 9-DoF, 1 decimal | 210 | **84.5 %** |
+| full 9-DoF, integer | 198 | **80.7 %** |
+| gyro only, integer, no mag | 171 | **70.5 %** |
+| \|gyro\| envelope pair (`Wmx`/`Wmn`) | 163 | **67.9 %** |
+| \|gyro\| max only (`Wmx`) | 152 | **64.1 %** |
+
+The pre-agreed acceptance line was **65 % duty**, which corresponds to a **155 B** frame —
+a **14 B** budget over the 141 B base. **No 3-axis representation of anything fits in
+14 B.** This is structural, not marginal: reduced precision recovers 12 of the needed 69
+bytes, and even dropping magnetometer entirely at integer precision misses the line.
+
+## A1.3 The decision: E+F — envelope in flight, raw channels on the pad
+
+- **FLIGHT frame (St:1 / St:2, 10 Hz): base + `Wmx`** — **152 B, 64.1 % duty.**
+- **PAD frame (St:0, 1 Hz): base + `Gyx Gyy Gyz Mgx Mgy Mgz`** — **210 B, 8.5 % duty.**
+
+Both shapes are v1-legal under ADR 0001's additive/missing-tag tolerance; a pad-shaped
+frame arriving mid-transition decodes by the additive rules, not by special-casing.
+
+**Why flight carries a magnitude envelope and not raw channels — the aliasing argument.**
+At plausible spin rates (> 5 Hz), 10 Hz samples of instantaneous gyro are spectrally
+aliased regardless of encoding; the in-flight raw channels were only ever fusion-reference
+input, never spin spectra. `Wmx` is the window **max of |ω| over the ~22 Hz onboard
+samples**, so spin *magnitude* survives unaliased at any TX rate — the same trick that
+justified `Gmx`/`Gmn` for accel spikes. What is genuinely lost in flight: spin phase and
+attitude reference.
+
+**Why the pad frame carries the raw channels — the calibration argument.** Ground-side
+fusion (Epic 5) needs stationary bias-reference data more than it needs aliased flight
+samples. Raw 9-DoF at 1 Hz on a stationary pad is exactly that record, captured where it
+is most useful, at 8.5 % duty.
+
+## A1.4 Frame tables with per-field range assumptions
+
+Existing 12 tags: assumptions as §4. New fields:
+
+| tag | frames | worst form | unit | range assumption |
+|---|---|---|---|---|
+| `Vel` | both | `Vel:-1999.9` | ft/s | ±1999.9 (F15 burnout ≈ 875 → 2.3× margin) |
+| `Gmx` | both | `Gmx:199.9` | g | window max of \|accel\|, 0–199.9 |
+| `Gmn` | both | `Gmn:199.9` | g | window min of \|accel\|; longest form governs |
+| `Wmx` | flight | `Wmx:2293.8` | dps | window max of \|gyro\|; LSM6DSOX ±2000 dps FS reports to ±2293.8 (int16 × 70 mdps/LSB) |
+| `Gyx/Gyy/Gyz` | pad | `-2293.8` | dps | raw gyro, same FS |
+| `Mgx/Mgy/Mgz` | pad | `-478.9` | µT | raw mag; LIS3MDL ±4 gauss FS → ±478.9 µT (int16 / 6842 LSB/gauss × 100) |
+
+Tag names are contract-level and were gated on the collision proof
+(`docs/newtag-collision-proof.md`) against every special-cased name in the ground
+pipeline and ADR 0001 Appendix A's rules (`Roll`/`Spin` stay reserved for fusion
+outputs; raw channels must not squat on them).
+
+**Buffer: `char msg[256]`**, sized to the largest frame (210 B pad), under the 251 B
+`RH_RF95_MAX_MESSAGE_LEN` cap. Range assumptions live beside the constant in a comment
+block so the number cannot drift from its justification.
+
+## A1.5 Binary v2 — deferred again, with the trigger on record
+
+Binary encoding is NOT taken now, for three reasons with evidence attached:
+
+1. **It does not cure the problem that motivates it here.** At 10 Hz TX, in-flight raw
+   gyro is aliased whatever the encoding (A1.3); binary would shrink the frame without
+   restoring the signal.
+2. **It is the largest contract change this system has** — it re-opens framing,
+   versioning, absent-vs-zero semantics via presence encoding, the session storage
+   format, a dual-format transition window, and full fixture regeneration.
+3. **It deserves its own epic, ADR and red team, AFTER the pigtail and the flight.**
+
+**Forcing functions now on record: the ASCII tax (§6), the 9-DoF fit failure (A1.2), and
+duty pressure at 10 Hz. When a fourth arrives, that is the trigger** to open the binary
+v2 epic — not before.
+
+## A1.6 Both-ends constants and measured numbers — *pending bench*
+
+Completed at build close-out: the sled-side and Pi-side bandwidth constants cited
+side-by-side by file:line (§7's silent-total-link-loss hazard), and the measured achieved
+sample rate, RX-turn distribution at real 10 Hz arrival (closing §8's 1 Hz-arrival
+caveat), skipped-TX count, and battery draw at the new duty — replacing every estimate
+above that a bench can measure.

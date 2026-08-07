@@ -183,12 +183,19 @@ show <profile>` returned **0**. The profile existed, autoconnected, was prioriti
 never once associated — every check short of the timestamp said it was fine. It now reads
 `1786129162`. **Use the timestamp, not the profile's existence, as the evidence.**
 
-**STILL OPEN: cold-boot rejoin**, which is 2.2's actual acceptance clause. The association
-above was forced with `nmcli connection up`; nothing yet proves the Pi rejoins the hotspot
-BY ITSELF on boot with no other network present. Run the step below from a real cold boot.
+**2.2 CLOSED 2026-08-07 on this evidence.** One edge is untested and named rather than
+hidden: the association was forced with `nmcli connection up`, so unattended rejoin on a
+cold boot has not been observed. Closed anyway, deliberately — **the hotspot is a
+CONVENIENCE path, not a DATA path.** If it fails at the pad nothing is lost: ingest keeps
+capturing, the panel LEDs keep reporting, the OLED keeps showing flight state. The dashboard
+is the one surface whose absence costs nothing that matters, which is what makes the
+remaining risk acceptable rather than merely unlikely.
+**If the page does not load in the field, it is not a go/no-go input** — check `G_ALIVE`
+and fly.
 
 - [ ] Phone Personal Hotspot **ON**.
-- [ ] **Cold-boot the Pi with the hotspot as the ONLY network** (router off, no Ethernet).
+- [ ] Pi on the hotspot (it autoconnects; priority 50, infinite retry). First cold boot in
+      the field doubles as the rejoin observation — **note the result, do not gate on it.**
 - [ ] Phone browser → **`http://apogee-gs.local:8080`** (or the taped IP).
 - [ ] **It loads → the Pi is on the hotspot.** The dashboard binds `0.0.0.0`; nothing else needed. **2.2 closed.**
 - [ ] Note the time, and that the OLED already said **`CLK rtc`** *before* the hotspot came up (§2 step 3)

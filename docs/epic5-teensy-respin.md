@@ -115,6 +115,17 @@ greppability pays.
 - Any over-65 %-duty result at the 5.e wire step is **forcing function #4 for binary
   v2** and starts the binary epic per ADR 0005 A1.5 — not another ASCII compromise.
 
+## Bring-up note — interleaved bench traffic is data, not noise
+
+During Teensy bring-up the Feather sled will often be powered on the same bench, so ground
+sessions will carry mixed-`SRC` packets. That is expected and USEFUL: the first Teensy
+TX-smoke deliberately observes and records what the ground does with mixed traffic —
+segmenter behaviour, panel, OLED source picker, session stats — and any bench session with
+mixed traffic gets a bench-sessions register entry per the provenance rules. In the FIELD
+the rule is one sled powered at a time (`docs/field-checklist.md`); sled-coexistence
+collision design is explicitly rejected (see the corrected jitter-rider entry in
+`docs/RESUME.md` — lander trigger, not sled trigger).
+
 ## 5. Explicitly NOT in Epic 5
 
 - **Binary v2** — own trigger, own epic (ADR 0005 A1.5).

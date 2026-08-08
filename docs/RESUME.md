@@ -819,7 +819,17 @@ Recent merged branches: `feat/status-oled` (4.4 dashboard density + 4.6 OLED + A
    landed (today it's 90 s silence + manual only — there is no landed signal).
 2. **SRC per-unit build config** (`-DSRC_ID` per device env) — never a shared constant; two
    sleds from one repo must not both claim `SRC:1`.
-3. **±10 % TX-interval jitter** — anti-lockstep for simultaneous birds.
+3. **±10 % TX-interval jitter** — anti-lockstep for simultaneous birds. **TRIGGER CORRECTED
+   2026-08-08 (Frank): revives when the LANDER (`SRC:2`) becomes real** — the node designed to
+   transmit concurrently with a sled. It does NOT revive for the Teensy respin: the two SLEDS
+   never transmit simultaneously in the field (one rocket flies at a time, the other sled is
+   powered off; the handheld is RX-only), so sled-coexistence collision design was
+   over-engineering for a scenario that can't occur. The field rule that replaces it lives in
+   `docs/field-checklist.md` ("one sled powered at a time"). Interleaved traffic on the BENCH
+   (Feather + Teensy powered together during bring-up) is expected, fine, and deliberately
+   observed — see `docs/epic5-teensy-respin.md` bring-up note. Multi-node ground findings
+   (per-SRC segmenter state, both-sources-`St:1`) file under **Epic 7 groundwork**, lander
+   trigger — not as a second-sled blocker.
 4. **Part-97 station ID** — `CALL:<callsign>` at TX start / ≤9.5 min / graceful shutdown,
    per-unit `-DCALLSIGN`. Ground side (decoder fixture + ingest `id` audit + CALL↔SYS
    binding) already merged; the **lander (Epic 7) inherits the ID-timer obligation.**

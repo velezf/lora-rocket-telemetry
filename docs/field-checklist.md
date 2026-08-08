@@ -25,6 +25,11 @@ Phone-readable. Cold hands. No laptop. **Save this page offline before leaving.*
 - [ ] **Back up the ops journal off the SD:** `~/apogee-data/ops-journal.jsonl`. Only irreplaceable file in the system.
 - [ ] **Join the Pi to the phone hotspot once, at home. Write its IP on tape on the box.**
       (`apogee-gs.local` usually resolves over the hotspot; the taped IP is the fallback.)
+- [ ] **ONE SLED POWERED AT A TIME at the range.** Operational rule, not a protocol: the
+      sleds have no coexistence design because they never fly together — one rocket flies,
+      the other sled stays POWERED OFF. (Mixed-`SRC` traffic is a bench-only situation and
+      is fine there.) The rule revives as engineering only when the lander (`SRC:2`) — the
+      node designed to transmit concurrently — becomes real.
 - [ ] **Antennas: the two ends have OPPOSITE rules. Know which is which.**
       **SLED — never power it without its antenna.** It transmits; an open port can kill the PA.
       **GROUND STATION — safe to power without one.** The Pi radio is **RX-only by

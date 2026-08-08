@@ -28,6 +28,7 @@
 #include <Adafruit_ADXL375.h>
 
 #include <packet.h>
+#include <txgate.h>
 #include <launch_confirm.h>
 #include <apogee_confirm.h>
 #include <convert.h>
@@ -56,6 +57,9 @@ launch::Confirm launchDet;   // 3 g / 100 ms / 50 ft / 2000 ms / fallback 300 ms
 // Confirmed apogee: hysteresis + dwell, so one noisy boost sample cannot latch St:2 for
 // the whole flight and corrupt the flight record. Constants are in TIME, not samples.
 apogee::Confirm apogeeDet(20.0f, 300);
+// Non-blocking TX gate: SEND/SKIP/FORCE decisions are pure and host-tested (lib/txgate);
+// only the mode() read and setModeIdle() stay here. 500 ms stuck bound (see txgate.h).
+txgate::Gate txGate;
 
 float groundPressure = 1013.25f;  // hPa, calibrated at boot
 float peakG = 0.0f;
@@ -173,45 +177,62 @@ void loop() {
     }
   }
 
-  // ---- TRANSMIT (slow, unchanged) ----
+  // ---- TRANSMIT (non-blocking; the sample loop no longer stops for the radio) ----
   if (now - lastTxMs >= TX_MS) {
     lastTxMs = now;
-    const bool inFlight   = launchDet.is_in_flight();
-    const bool descending = apogeeDet.is_descending();
 
-    Packet p;
-    p.sys    = SYS_ID;
-    p.src    = SRC_ID;
-    p.seq    = seq;
-    p.state  = !inFlight ? 0u : (descending ? 2u : 1u);
-    p.alt_ft = (int)lroundf(lastAltFt);
-    p.max_ft = (int)lroundf(apogeeDet.max_altitude());   // 0 until first in-flight sample
-    p.g      = lastG;
-    p.pg     = peakG;
-    p.temp_c = lastTempC;
-    p.batt_v = readBatteryVoltage();
-    p.met_s  = inFlight ? (unsigned int)((now - launchTime) / 1000UL) : 0u;
+    // The old path was send() + waitPacketSent(), which blocked the ONE thread this
+    // firmware has for the whole time-on-air — measured at ~33 ms of every 59 ms sample
+    // period at 1 Hz, and fatal at any higher TX rate. RadioHead's send() is async-start;
+    // the gate (pure, host-tested) decides SEND / SKIP / FORCE from mode() alone.
+    const txgate::Decision txd =
+        txGate.update(rf95.mode() == RHGenericDriver::RHModeTx, now);
 
-    // 256 B: sized to the LARGEST frame of the E+F split (ADR 0005 A1.4) — the 210 B
-    // worst-case PAD frame (12 tags + Vel/Gmx/Gmn + raw 9-DoF), not the 152 B flight
-    // frame — under the 251 B RH_RF95_MAX_MESSAGE_LEN send cap. Range assumptions
-    // behind those worst cases live in the A1.4 table; if a field's range grows, the
-    // table and this size move together or encode_packet starts returning 0 below.
-    char msg[256];
-    size_t n = encode_packet(p, msg, sizeof(msg));
-    if (n == 0) {
-      // encode_packet is LOUD on truncation: nothing is transmitted, the failure is
-      // counted and printed, and SEQ still advances so the ground sees a SEQ gap
-      // instead of silence it can misread as RF loss being absent.
-      encodeFailures++;
-      Serial.println("ENCODE OVERFLOW: frame dropped");
+    if (txd == txgate::SKIP) {
+      // Previous frame still on air. SEQ DOES NOT ADVANCE: a scheduling skip published
+      // as a SEQ gap would be counted by the ground as RF loss (the SEQ-gap statistic is
+      // the loss statistic), lying about the link. Fresh data goes at the next tick.
     } else {
-      Serial.print("TX: "); Serial.println(msg);
-      rf95.send((uint8_t*)msg, n);
-      rf95.waitPacketSent();
-    }
+      if (txd == txgate::FORCE_IDLE_SEND) {
+        rf95.setModeIdle();   // missed TxDone: the old unbounded hang, now bounded+counted
+      }
 
-    seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR
+      const bool inFlight   = launchDet.is_in_flight();
+      const bool descending = apogeeDet.is_descending();
+
+      Packet p;
+      p.sys    = SYS_ID;
+      p.src    = SRC_ID;
+      p.seq    = seq;
+      p.state  = !inFlight ? 0u : (descending ? 2u : 1u);
+      p.alt_ft = (int)lroundf(lastAltFt);
+      p.max_ft = (int)lroundf(apogeeDet.max_altitude());   // 0 until first in-flight sample
+      p.g      = lastG;
+      p.pg     = peakG;
+      p.temp_c = lastTempC;
+      p.batt_v = readBatteryVoltage();
+      p.met_s  = inFlight ? (unsigned int)((now - launchTime) / 1000UL) : 0u;
+
+      // 256 B: sized to the LARGEST frame of the E+F split (ADR 0005 A1.4) — the 210 B
+      // worst-case PAD frame (12 tags + Vel/Gmx/Gmn + raw 9-DoF), not the 152 B flight
+      // frame — under the 251 B RH_RF95_MAX_MESSAGE_LEN send cap. Range assumptions
+      // behind those worst cases live in the A1.4 table; if a field's range grows, the
+      // table and this size move together or encode_packet starts returning 0 below.
+      char msg[256];
+      size_t n = encode_packet(p, msg, sizeof(msg));
+      if (n == 0) {
+        // encode_packet is LOUD on truncation: nothing is transmitted, the failure is
+        // counted and printed, and SEQ still advances so the ground sees a SEQ gap
+        // instead of silence it can misread as RF loss being absent.
+        encodeFailures++;
+        Serial.println("ENCODE OVERFLOW: frame dropped");
+      } else {
+        Serial.print("TX: "); Serial.println(msg);
+        rf95.send((uint8_t*)msg, n);   // async-start; NO waitPacketSent — that was the
+                                       // ~33 ms/sample the loop has been paying
+      }
+      seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR; NOT reached on SKIP
+    }
 
     // Achieved sample rate over the last window — the measurement, printed with the build.
     if (sampleWindowStart == 0) sampleWindowStart = now;
@@ -221,7 +242,9 @@ void loop() {
       // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
       // telling you it was knocked -- and that it correctly declined to call it a launch.
       Serial.print(", launch reverts "); Serial.print(launchDet.reverts());
-      Serial.print(", encode overflows "); Serial.println(encodeFailures);
+      Serial.print(", encode overflows "); Serial.print(encodeFailures);
+      Serial.print(", tx skips "); Serial.print(txGate.skipped());
+      Serial.print(", tx forced "); Serial.println(txGate.forced());
       sampleCount = 0; sampleWindowStart = now;
     }
   }

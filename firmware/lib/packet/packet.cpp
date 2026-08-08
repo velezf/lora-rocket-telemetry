@@ -26,10 +26,15 @@ size_t encode_packet(const Packet& p, char* out, size_t out_len) {
         out[0] = '\0';
         return 0;
     }
-    // On truncation snprintf returns the would-be length; report bytes actually
-    // written (never counting the NUL, never past the buffer).
+    // TRUNCATION IS LOUD. The old contract returned out_len-1 here — a valid-looking
+    // length — and the fragment went to air, where it DECODED: a frame cut at 105 B
+    // yielded a valid packet with MET:6 against a true 65535, no counter moved
+    // (measured 2026-08-07, docs/newtag-collision-proof.md §5 context). No real frame
+    // is 0 bytes, so 0 is the unambiguous failure return, and the buffer is emptied so
+    // a caller that ignores the return value transmits nothing rather than a lie.
     if (static_cast<size_t>(n) >= out_len) {
-        return out_len - 1;
+        out[0] = '\0';
+        return 0;
     }
     return static_cast<size_t>(n);
 }

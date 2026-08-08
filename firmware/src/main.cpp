@@ -120,6 +120,7 @@ static bool  haveSample = false;
 // property, not a chosen one. Counting and printing it means the number arrives with the
 // build instead of gating it, and a shortfall is visible on the bench rather than inferred.
 static unsigned long sampleCount = 0, sampleWindowStart = 0, baroFailures = 0;
+static unsigned long encodeFailures = 0;   // frames dropped LOUDLY by encode_packet
 
 void loop() {
   const unsigned long now = millis();
@@ -180,12 +181,24 @@ void loop() {
     p.batt_v = readBatteryVoltage();
     p.met_s  = inFlight ? (unsigned int)((now - launchTime) / 1000UL) : 0u;
 
-    char msg[128];
+    // 256 B: sized to the LARGEST frame of the E+F split (ADR 0005 A1.4) — the 210 B
+    // worst-case PAD frame (12 tags + Vel/Gmx/Gmn + raw 9-DoF), not the 152 B flight
+    // frame — under the 251 B RH_RF95_MAX_MESSAGE_LEN send cap. Range assumptions
+    // behind those worst cases live in the A1.4 table; if a field's range grows, the
+    // table and this size move together or encode_packet starts returning 0 below.
+    char msg[256];
     size_t n = encode_packet(p, msg, sizeof(msg));
-
-    Serial.print("TX: "); Serial.println(msg);
-    rf95.send((uint8_t*)msg, n);
-    rf95.waitPacketSent();
+    if (n == 0) {
+      // encode_packet is LOUD on truncation: nothing is transmitted, the failure is
+      // counted and printed, and SEQ still advances so the ground sees a SEQ gap
+      // instead of silence it can misread as RF loss being absent.
+      encodeFailures++;
+      Serial.println("ENCODE OVERFLOW: frame dropped");
+    } else {
+      Serial.print("TX: "); Serial.println(msg);
+      rf95.send((uint8_t*)msg, n);
+      rf95.waitPacketSent();
+    }
 
     seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR
 
@@ -196,7 +209,8 @@ void loop() {
       Serial.print(" Hz achieved, baro failures "); Serial.print(baroFailures);
       // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
       // telling you it was knocked -- and that it correctly declined to call it a launch.
-      Serial.print(", launch reverts "); Serial.println(launchDet.reverts());
+      Serial.print(", launch reverts "); Serial.print(launchDet.reverts());
+      Serial.print(", encode overflows "); Serial.println(encodeFailures);
       sampleCount = 0; sampleWindowStart = now;
     }
   }

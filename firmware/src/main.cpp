@@ -29,6 +29,7 @@
 
 #include <packet.h>
 #include <txgate.h>
+#include <sensor_health.h>
 #include <launch_confirm.h>
 #include <apogee_confirm.h>
 #include <convert.h>
@@ -60,6 +61,9 @@ apogee::Confirm apogeeDet(20.0f, 300);
 // Non-blocking TX gate: SEND/SKIP/FORCE decisions are pure and host-tested (lib/txgate);
 // only the mode() read and setModeIdle() stay here. 500 ms stuck bound (see txgate.h).
 txgate::Gate txGate;
+// Per-sensor read isolation: separate failure counters, time-based health (see
+// sensor_health.h — including why the ADXL375 is deliberately not covered).
+sensors::Health sensorHealth;
 
 float groundPressure = 1013.25f;  // hPa, calibrated at boot
 float peakG = 0.0f;
@@ -134,7 +138,7 @@ static bool  haveSample = false;
 // Achieved-rate self-report: the BMP390's real throughput at our oversampling is a MEASURED
 // property, not a chosen one. Counting and printing it means the number arrives with the
 // build instead of gating it, and a shortfall is visible on the bench rather than inferred.
-static unsigned long sampleCount = 0, sampleWindowStart = 0, baroFailures = 0;
+static unsigned long sampleCount = 0, sampleWindowStart = 0;
 static unsigned long encodeFailures = 0;   // frames dropped LOUDLY by encode_packet
 
 void loop() {
@@ -147,18 +151,20 @@ void loop() {
     // loop, which also skipped the transmission — one bad I2C read cost a packet, and at
     // 20 Hz there are 20x more chances to hit it. One failure path must not take out an
     // unrelated responsibility.
-    // baroOk is the launch detector's altitude-validity signal as well as the failure counter:
-    // a read that did not answer must not be allowed to look like "altitude is not climbing".
+    // baroOk is the launch detector's altitude-validity signal as well as the health
+    // input: a read that did not answer must not look like "altitude is not climbing".
     const bool baroOk = bmp.performReading();
+    sensorHealth.note(sensors::BARO, baroOk, now);
     if (baroOk) {
       lastAltFt  = pressure_to_altitude_ft(bmp.pressure / 100.0f, groundPressure);
       lastTempC  = bmp.temperature;
       haveSample = true;
       sampleCount++;
-    } else {
-      baroFailures++;
     }
 
+    // The ADXL375 read has NO failure signal — getEvent() returns true unconditionally
+    // (verified in the vendored driver), and zero-magnitude-as-failure would trip on a
+    // coasting rocket at a legitimate ~0 g. Unmonitored BY DESIGN; see sensor_health.h.
     sensors_event_t e;
     adxl.getEvent(&e);
     lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
@@ -238,7 +244,7 @@ void loop() {
     if (sampleWindowStart == 0) sampleWindowStart = now;
     else if (now - sampleWindowStart >= 5000UL) {
       Serial.print("RATE: "); Serial.print(sampleCount * 1000.0f / (now - sampleWindowStart));
-      Serial.print(" Hz achieved, baro failures "); Serial.print(baroFailures);
+      Serial.print(" Hz achieved, baro failures "); Serial.print(sensorHealth.failures(sensors::BARO));
       // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
       // telling you it was knocked -- and that it correctly declined to call it a launch.
       Serial.print(", launch reverts "); Serial.print(launchDet.reverts());

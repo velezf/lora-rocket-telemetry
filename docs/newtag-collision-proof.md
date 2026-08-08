@@ -109,3 +109,26 @@ case-folds, so e.g. `Gmx` vs `G` cannot converge under normalization.
 - **F3 — handheld has no parser yet** (`handheld/` is one ADR, no code), so the 8.x
   consumer inherits these names with no migration burden — worth citing this proof from
   the handheld parser's first commit.
+
+## 5. F1 golden byte-identity — hashes, not assertions
+
+The full F1 chain (fixture bytes → re-decode of every raw frame → derived index →
+per-flight CSV export → `flights.json` summary) was hashed on the base commit
+(`0ca46dc`, before any change on this branch) and again after all of it (decoder rows +
+new fixtures). **All six SHA-256 digests are identical**, and
+`ground/flights/tests/test_f1_golden.py` passes 4/4 both times:
+
+| artifact | sha256 (identical before and after) |
+|---|---|
+| `f1_session.jsonl` (fixture bytes) | `a8e924029f3635cd0b641fa6658f95267b21fa3f6d9d9ea6e72add245e55b583` |
+| `f1_ops.jsonl` (fixture bytes) | `9bf3148a89594582b9ca3f76965b85f3cb6d362a709d959f21048e410db688d9` |
+| re-decoded fields+unknown of all 94 frames | `05ef151671cdb5463b6fbf0263d28a0f5e710f76f3cc55b2f397eeec36e33b08` |
+| derived flights index | `fb77a14a69b3775cb91719b41853c0f17429e3c2dd39320f4d08a55816086b81` |
+| exported CSV trace | `51b4c554f758d573c9f309b1b9257783273e152402791a20cbc066e23fabab10` |
+| `flights.json` summary | `19635db194ec47c42b8892c13b7384ce7f37c332a0add19cbe44fb0a2834e6f4` |
+
+Why identity was expected AND still had to be measured: F1 flew 2026-07-08 with the
+12-tag format — `grep -cE '(Vel|Gmx|Gmn|Wmx|Gy[xyz]|Mg[xyz])'` over `f1_session.jsonl`
+is 0 — and the decoder change only adds exact-key table rows, so no F1 token can resolve
+differently. The hash comparison is what makes that an observation instead of the same
+reasoning the implementation was built from.

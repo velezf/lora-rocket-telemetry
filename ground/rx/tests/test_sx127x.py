@@ -83,11 +83,12 @@ class TestConfigure(unittest.TestCase):
         # first opmode write enters LoRa+sleep; final is LoRa+RXCONTINUOUS
         self.assertEqual(self.spi.wrote(R_OPMODE), LORA | RXCONT)
 
-    def test_configure_modem_registers_for_bw125_sf7_cr45_crc(self):
+    def test_configure_modem_registers_for_bw500_sf7_cr45_crc(self):
+        # Default is BW500 per docs/adr/0005-telemetry-rate-and-rf-configuration.md.
         self.rx.configure()
-        self.assertEqual(self.spi.wrote(R_MODEM1), 0x72)  # BW125, CR4/5, explicit hdr
+        self.assertEqual(self.spi.wrote(R_MODEM1), 0x92)  # BW500, CR4/5, explicit hdr
         self.assertEqual(self.spi.wrote(R_MODEM2), 0x74)  # SF7, CRC on
-        self.assertEqual(self.spi.wrote(R_MODEM3), 0x04)  # AGC on, LDRO off
+        self.assertEqual(self.spi.wrote(R_MODEM3), 0x04)  # AGC on, LDRO off (0.256 ms symbol)
 
     def test_configure_frequency_434mhz(self):
         self.rx.configure()
@@ -116,6 +117,24 @@ class TestConfigEncoding(unittest.TestCase):
         self.assertEqual(spi.wrote(R_MODEM1), 0x88)
         # SF9 -> (9<<4)|CRC(0x04) = 0x94
         self.assertEqual(spi.wrote(R_MODEM2), 0x94)
+
+    def test_bw500_cr45_explicit_header_register_byte(self):
+        # The ADR 0005 flight configuration, asserted independently of the
+        # default: BW500 code 0x9, CR4/5 code 1, explicit header bit0=0
+        # -> RegModemConfig1 = (0x9<<4)|(1<<1)|0 = 0x92.
+        from ground.rx.sx127x import _BW_CODES
+        self.assertIn(500, _BW_CODES)
+        self.assertEqual(_BW_CODES[500], 0x9)
+        cfg = LoRaConfig(bandwidth_khz=500, spreading_factor=7, coding_rate=5)
+        self.assertEqual(cfg.modem_config1(), 0x92)
+
+    def test_default_config_is_the_adr0005_flight_config(self):
+        # One authority for the both-ends constant (cited in LoRaConfig): if the
+        # default drifts off SF7/BW500/CR4:5 the link to the sled goes silently
+        # dark, so the default itself is pinned here.
+        cfg = LoRaConfig()
+        self.assertEqual((cfg.bandwidth_khz, cfg.spreading_factor, cfg.coding_rate),
+                         (500, 7, 5))
 
 
 class TestReceive(unittest.TestCase):

@@ -16,7 +16,9 @@ def obs(received_at, src, st, alt, peak, seq, rssi=-60, call=None, met=None):
         pkt += f" MET:{met}"
     if call:
         pkt += f" CALL:{call}"
-    return Observation(received_at, rssi, decode(pkt.encode()), 0.0)
+    # mono rides SEQ: the fixtures send one packet per second, so the sequence
+    # number doubles as the monotonic clock the time-based baseline window reads.
+    return Observation(received_at, rssi, decode(pkt.encode()), float(seq))
 
 
 def beacon(received_at, src, call="KC3ZTQ", rssi=-60):

@@ -270,7 +270,11 @@ class TestLiveAndRebuildAgree(unittest.TestCase):
         """A 0 ft sample among -83 ft pad reads blows the stability gate, so the
         baseline goes None and the flight loses its AGL zero entirely."""
         self.assertEqual(_rebuild_stats(_FRAMES)["baseline_ft"], -83)
-        self.assertEqual(_rebuild_stats(_FRAMES)["baseline_n"], 15)
+        # n is 14, not 15, since the window went TIME-based (ADR 0005 §7): the
+        # ALT-less frame occupies 1 s of the fixture's timeline, so the 2 s tail
+        # exclusion is anchored on wall-clock time, not on the last two ALT
+        # samples. The property under test — the baseline itself — is unchanged.
+        self.assertEqual(_rebuild_stats(_FRAMES)["baseline_n"], 14)
 
     def test_live_and_rebuild_derive_identical_stats(self):
         self.assertEqual(_live_stats(_FRAMES), _rebuild_stats(_FRAMES))

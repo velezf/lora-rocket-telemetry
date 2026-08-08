@@ -82,7 +82,18 @@ void setup() {
   rf95.setTxPower(23, false);
 
   if (!bmp.begin_I2C()) { Serial.println("BMP390 not found"); while (1); }
-  bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
+  // 1x oversampling, NOT temp-off: BMP3 pressure compensation REQUIRES the temperature
+  // term (temp_en is set unconditionally inside performReading), so the sensor still
+  // converts temperature once per reading — only the oversampling drops,
+  // 16,323 us -> 2,183 us. The API name for 1x is BMP3_NO_OVERSAMPLING (0x00 = one
+  // conversion, no extra samples) — "NO_OVERSAMPLING" does not mean "no temperature".
+  //
+  // JUSTIFICATION, CORRECTED (2026-08-07, two agents independently): this is NOT a
+  // sample-rate fix. performReading() does not wait for the conversion, so the old 8x
+  // setting was never the reason the loop ran at 17 Hz — waitPacketSent() was. This
+  // change is the PRECONDITION for any tick below 25 ms of conversion latency, and its
+  // effect on achieved rate is MEASURED at the bench, not assumed here.
+  bmp.setTemperatureOversampling(BMP3_NO_OVERSAMPLING);
   bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
   bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
 

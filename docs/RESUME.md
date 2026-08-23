@@ -72,7 +72,27 @@ The 10 Hz sustained bench runs **antenna-less at arm's length** (the link decode
 measured **−80/−81 dBm**). Report **loss** and **FIFO-overwrite** counts. This validates the
 sled, the loop and the ground pipeline. **It does not validate the RF path.**
 
-### DEFERRED — all pigtail-gated, do not attempt
+### DEFERRED — pigtail items CLEARED 2026-08-08; what remains is flight-gated
+
+**The pigtail arrived, was wired to the project-box bulkhead antenna, and the repair was
+CLEARED by Frank**: close range −40 ±1 dBm / zero loss / σ 0.38 (vs −80/−81 antenna-less;
+gate −38..−14 — 2 dB shy of the weak edge, attributed to chain insertion loss). Wiggle
+test and formal continuity check waived on judgement — named in ADR 0005 §2. **Still
+open, now FLIGHT-gated, not pigtail-gated:** field-range margin, and the flight itself
+(red team + bench first).
+
+**WEDGED-RADIO HARDENING — admission-rule candidate with evidence (2026-08-08).** During
+the antenna work the SX127x latched into a state that decoded NOTHING for 3.7 h while
+ingest ran healthy — heartbeat green, loop turning, `G_RX` dark (the panel told the
+truth; believe the LEDs). A polling driver cannot distinguish a wedged radio from a
+silent sky: IRQ flags simply never set. Recovery was a service restart (full re-init).
+Passes the admission rule: (a) at the field, wedging between pad power-cycle and launch
+is a LOST FLIGHT; (b) tonight is the concrete evidence. Candidate fix: re-init the radio
+after N minutes of RX silence — harmless when the sky is genuinely quiet. Also a
+red-team hunting ground: the RX path has a latch with no bounded exit, the same class
+just removed from the sled's detectors.
+
+### Superseded 2026-08-08 (original pigtail-gated list)
 
 - **Field-range link margin.** ADR 0005 §2's ~42 dB is a *design assumption*, unvalidated.
 - **u.FL continuity check** — centre pin NOT shorted to shield, before the new pigtail is

@@ -33,6 +33,8 @@
 #include <launch_confirm.h>
 #include <apogee_confirm.h>
 #include <convert.h>
+#include <velocity.h>
+#include <envelope.h>
 
 // -------------------- Pins / radio --------------------
 #define RFM95_CS    8
@@ -64,6 +66,13 @@ txgate::Gate txGate;
 // Per-sensor read isolation: separate failure counters, time-based health (see
 // sensor_health.h — including why the ADXL375 is deliberately not covered).
 sensors::Health sensorHealth;
+// Vel: onboard dh/dt at the sample rate, time-constant EMA (tau lives in velocity.h).
+// Fed ONLY on good baro reads — a failed read widens dt instead of faking a sample.
+velocity::Estimator velEst;
+// Gmx/Gmn: min/max |g| across the TX window. Reset discipline is in envelope.h: reset
+// ONLY when a frame actually goes to air, so a TX skip extends the window rather than
+// losing a spike to scheduling.
+envelope::Window gEnv;
 
 float groundPressure = 1013.25f;  // hPa, calibrated at boot
 float peakG = 0.0f;
@@ -160,6 +169,7 @@ void loop() {
       lastTempC  = bmp.temperature;
       haveSample = true;
       sampleCount++;
+      velEst.update(lastAltFt, now);
     }
 
     // The ADXL375 read has NO failure signal — getEvent() returns true unconditionally
@@ -168,6 +178,7 @@ void loop() {
     sensors_event_t e;
     adxl.getEvent(&e);
     lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
+    gEnv.note(lastG);   // every sample reaches the envelope; TX consumes it below
 
     // launch_ms() is BACKDATED to the accel gate, so the confirmation window buys robustness
     // without moving MET zero. Using `now` here would charge MET for the whole window.
@@ -218,6 +229,9 @@ void loop() {
       p.temp_c = lastTempC;
       p.batt_v = readBatteryVoltage();
       p.met_s  = inFlight ? (unsigned int)((now - launchTime) / 1000UL) : 0u;
+      p.vel_fps = velEst.vel_fps();
+      p.gmx     = gEnv.gmx();
+      p.gmn     = gEnv.gmn();
 
       // 256 B: sized to the LARGEST frame of the E+F split (ADR 0005 A1.4) — the 210 B
       // worst-case PAD frame (12 tags + Vel/Gmx/Gmn + raw 9-DoF), not the 152 B flight
@@ -236,6 +250,9 @@ void loop() {
         Serial.print("TX: "); Serial.println(msg);
         rf95.send((uint8_t*)msg, n);   // async-start; NO waitPacketSent — that was the
                                        // ~33 ms/sample the loop has been paying
+        gEnv.reset();                  // the window's values are ON AIR — and only now:
+                                       // an encode drop above keeps accumulating, so the
+                                       // spike is not lost with the frame
       }
       seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR; NOT reached on SKIP
     }

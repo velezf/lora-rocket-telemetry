@@ -13,14 +13,18 @@ size_t encode_packet(const Packet& p, char* out, size_t out_len) {
     int n = snprintf(
         out, out_len,
         "V:1 SYS:%u SRC:%u SEQ:%u St:%u ALT:%dft Max:%dft "
-        "G:%.1f Pg:%.1f T:%.1fC Batt:%.2fV MET:%u",
+        "G:%.1f Pg:%.1f T:%.1fC Batt:%.2fV MET:%u "
+        "Vel:%.1f Gmx:%.1f Gmn:%.1f",
         p.sys, p.src, p.seq, p.state,
         p.alt_ft, p.max_ft,
         static_cast<double>(p.g),
         static_cast<double>(p.pg),
         static_cast<double>(p.temp_c),
         static_cast<double>(p.batt_v),
-        p.met_s);
+        p.met_s,
+        static_cast<double>(p.vel_fps),
+        static_cast<double>(p.gmx),
+        static_cast<double>(p.gmn));
 
     if (n < 0) {
         out[0] = '\0';

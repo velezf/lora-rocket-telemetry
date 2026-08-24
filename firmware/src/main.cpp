@@ -36,6 +36,7 @@
 #include <velocity.h>
 #include <envelope.h>
 #include <rf_config.h>
+#include <txsched.h>
 
 // -------------------- Pins / radio --------------------
 #define RFM95_CS    8
@@ -148,7 +149,9 @@ void setup() {
 // (41.2 ft) — so if the BMP390 cannot sustain 20 Hz at the configured oversampling, a lower
 // achieved rate degrades this gracefully rather than invalidating it.
 static const unsigned long SAMPLE_MS = 50;    // 20 Hz target; ACHIEVED rate is reported below
-static const unsigned long TX_MS     = 1000;  // 1 Hz — DO NOT CHANGE without an ADR review
+// TX interval is NO LONGER A CONSTANT: 1 Hz pad / 10 Hz flight, MET-bounded — the
+// ADR review the old "DO NOT CHANGE" note demanded is ADR 0005. Policy, rates and
+// the fast-window bound live in lib/txsched/txsched.h (cited, not restated).
 
 static unsigned long lastSampleMs = 0;
 static unsigned long lastTxMs     = 0;
@@ -206,7 +209,7 @@ void loop() {
   }
 
   // ---- TRANSMIT (non-blocking; the sample loop no longer stops for the radio) ----
-  if (now - lastTxMs >= TX_MS) {
+  if (now - lastTxMs >= txsched::interval_ms(launchDet.is_in_flight(), now, launchTime)) {
     lastTxMs = now;
 
     // The old path was send() + waitPacketSent(), which blocked the ONE thread this

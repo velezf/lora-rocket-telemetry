@@ -156,7 +156,6 @@ static const unsigned long SAMPLE_MS = 50;    // 20 Hz target; ACHIEVED rate is 
 static unsigned long lastSampleMs = 0;
 static unsigned long lastTxMs     = 0;
 static float lastAltFt = 0.0f, lastTempC = 0.0f, lastG = 0.0f;
-static bool  haveSample = false;
 
 // Achieved-rate self-report: the BMP390's real throughput at our oversampling is a MEASURED
 // property, not a chosen one. Counting and printing it means the number arrives with the
@@ -181,7 +180,6 @@ void loop() {
     if (baroOk) {
       lastAltFt  = pressure_to_altitude_ft(bmp.pressure / 100.0f, groundPressure);
       lastTempC  = bmp.temperature;
-      haveSample = true;
       sampleCount++;
       velEst.update(lastAltFt, now);
     }
@@ -203,7 +201,13 @@ void loop() {
       Serial.println(launchDet.used_fallback() ? ", ALTITUDE UNAVAILABLE (accel-only)" : "");
     }
     if (launchDet.is_in_flight()) {
-      if (haveSample) apogeeDet.update(lastAltFt, now);
+      // Gate on baroOk, NOT on ever-having-sampled: apogee::Confirm's dwell is
+      // TIME-based, so replaying a stale altitude with a fresh timestamp is live
+      // evidence to it — a noise dip followed by a >=300 ms baro wedge would
+      // confirm St:2 from a sensor that wasn't answering (red team, 2026-08-24).
+      // A read that did not answer contributes NOTHING, same discipline as
+      // velEst and launchDet above.
+      if (baroOk) apogeeDet.update(lastAltFt, now);
       if (lastG > peakG) peakG = lastG;
     }
   }

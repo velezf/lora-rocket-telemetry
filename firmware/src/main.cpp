@@ -16,7 +16,7 @@
  * counter (wraps at 65535), St flight-state code (0 pad / 1 ascent / 2 descent),
  * MET seconds since launch.
  *
- * Hardware: Adafruit Feather M0 + RFM95 (434 MHz, 23 dBm), BMP390 (I2C),
+ * Hardware: Adafruit Feather M0 + RFM95 (RF params in lib/rfconfig/rf_config.h), BMP390 (I2C),
  *           ADXL375 (I2C).
  */
 #include <Arduino.h>
@@ -35,12 +35,13 @@
 #include <convert.h>
 #include <velocity.h>
 #include <envelope.h>
+#include <rf_config.h>
 
 // -------------------- Pins / radio --------------------
 #define RFM95_CS    8
 #define RFM95_RST   4
 #define RFM95_INT   3
-#define RF95_FREQ   434.0  // MHz
+// RF link parameters live in rf_config.h (both-ends constants, ADR 0005) — not here.
 
 static const unsigned int SYS_ID = 7;  // ADR default network id
 static const unsigned int SRC_ID = 1;  // 1 = sled
@@ -95,8 +96,18 @@ void setup() {
   digitalWrite(RFM95_RST, LOW); delay(10);
   digitalWrite(RFM95_RST, HIGH); delay(10);
   if (!rf95.init()) { Serial.println("LoRa init failed"); while (1); }
-  rf95.setFrequency(RF95_FREQ);
-  rf95.setTxPower(23, false);
+  rf95.setFrequency(rf::FREQ_HZ / 1e6f);
+  // BW500 cutover (ADR 0005; build-order step 6). The enum name encodes the values
+  // (500 kHz / CR 4:5 / 128 chips = SF7); the static_assert welds it to rf_config.h,
+  // which the ground station's cross-end test reads — so neither end can move alone.
+  static_assert(rf::BANDWIDTH_KHZ == 500 && rf::SPREADING_FACTOR == 7
+                    && rf::CODING_RATE_DENOM == 5,
+                "Bw500Cr45Sf128 below no longer matches rf_config.h — pick the "
+                "ModemConfigChoice that encodes the header's values");
+  if (!rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128)) {
+    Serial.println("modem config failed"); while (1);
+  }
+  rf95.setTxPower(rf::TX_POWER_DBM, false);
 
   if (!bmp.begin_I2C()) { Serial.println("BMP390 not found"); while (1); }
   // 1x oversampling, NOT temp-off: BMP3 pressure compensation REQUIRES the temperature

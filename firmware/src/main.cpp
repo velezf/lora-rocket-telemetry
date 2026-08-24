@@ -98,16 +98,17 @@ void setup() {
   digitalWrite(RFM95_RST, HIGH); delay(10);
   if (!rf95.init()) { Serial.println("LoRa init failed"); while (1); }
   rf95.setFrequency(rf::FREQ_HZ / 1e6f);
-  // BW500 cutover (ADR 0005; build-order step 6). The enum name encodes the values
-  // (500 kHz / CR 4:5 / 128 chips = SF7); the static_assert welds it to rf_config.h,
-  // which the ground station's cross-end test reads — so neither end can move alone.
-  static_assert(rf::BANDWIDTH_KHZ == 500 && rf::SPREADING_FACTOR == 7
-                    && rf::CODING_RATE_DENOM == 5,
-                "Bw500Cr45Sf128 below no longer matches rf_config.h — pick the "
-                "ModemConfigChoice that encodes the header's values");
-  if (!rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128)) {
-    Serial.println("modem config failed"); while (1);
-  }
+  // BW500 cutover (ADR 0005; step 6), hardened per red-team finding 1: the modem
+  // registers are DERIVED from rf_config.h at compile time — no ModemConfigChoice
+  // enum whose meaning lives in prose. Derivation mirrored from the ground station
+  // and pinned by test_rfconfig; the cross-end test compares register semantics.
+  RH_RF95::ModemConfig modem = { rf::MODEM_REG_1D, rf::MODEM_REG_1E, rf::MODEM_REG_26 };
+  rf95.setModemRegisters(&modem);
+  rf95.setPreambleLength(rf::PREAMBLE_LEN);
+  // RadioHead never writes RegSyncWord; the SX127x powers on at 0x12 and the ground
+  // writes 0x12 explicitly. Written here too so the sled's sync word is PROGRAMMED
+  // from the shared constant, not assumed from power-on state.
+  rf95.spiWrite(RH_RF95_REG_39_SYNC_WORD, rf::SYNC_WORD);
   rf95.setTxPower(rf::TX_POWER_DBM, false);
 
   if (!bmp.begin_I2C()) { Serial.println("BMP390 not found"); while (1); }

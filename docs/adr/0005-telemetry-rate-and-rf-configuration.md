@@ -1,6 +1,9 @@
 # ADR 0005 — Telemetry rate and RF configuration: 10 Hz at SF7/BW500
 
-**Status:** ACCEPTED — §8's gate was measured and passed 2026-08-06 (see §8)
+**Status:** ACCEPTED — §8's gate was measured and passed 2026-08-06 (see §8). **Read
+that as clearing the DECISION, not the build: the measurement was taken at 1 Hz
+arrival / BW125 / 109 B frames** (§8's own caveat) — the artifact that flies is
+covered only by A1.6's sustained-10 Hz bench, which is still pending.
 **Date:** 2026-08-06
 **Supersedes:** nothing. **Amends:** the RF configuration implied by ADR 0002's receiver.
 

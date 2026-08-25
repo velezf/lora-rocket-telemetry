@@ -26,6 +26,8 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP3XX.h>
 #include <Adafruit_ADXL375.h>
+#include <Adafruit_LSM6DSOX.h>
+#include <Adafruit_LIS3MDL.h>
 
 #include <packet.h>
 #include <txgate.h>
@@ -51,6 +53,11 @@ static const unsigned int SRC_ID = 1;  // 1 = sled
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 Adafruit_BMP3XX bmp;
 Adafruit_ADXL375 adxl(0x53, &Wire);
+// 9-DoF (E+F frame split, ADR 0005 A1.3): addresses per docs/RESUME.md:457 —
+// LSM6DSOX at 0x6a, LIS3MDL at 0x1c (the WHO_AM_I VALUES 0x6C/0x3D are not
+// addresses; that confusion cost an agent twenty minutes once).
+Adafruit_LSM6DSOX lsm6ds;
+Adafruit_LIS3MDL  lis3mdl;
 
 // Confirmed launch: CONFIRM-OR-REVERT. The accel gate (3 g held 100 ms) only decides when to
 // START watching altitude; the ALTITUDE GAIN is what declares the launch, and a provisional
@@ -75,6 +82,14 @@ velocity::Estimator velEst;
 // ONLY when a frame actually goes to air, so a TX skip extends the window rather than
 // losing a spike to scheduling.
 envelope::Window gEnv;
+// Wmx: same window mechanism over |gyro| dps (flight frames). Instantaneous gyro at
+// 10 Hz TX would alias at plausible spin rates; the window max survives any TX rate
+// (A1.3's aliasing argument). Same reset-on-air discipline as gEnv.
+envelope::Window wEnv;
+// Latest raw 9-DoF sample, dps / µT — pad frames transmit these at 1 Hz as Epic 5's
+// stationary calibration record (A1.3: raw channels belong on the pad, not in flight).
+static float lastGyx = 0, lastGyy = 0, lastGyz = 0;
+static float lastMgx = 0, lastMgy = 0, lastMgz = 0;
 
 float groundPressure = 1013.25f;  // hPa, calibrated at boot
 float peakG = 0.0f;
@@ -132,6 +147,16 @@ void setup() {
   groundPressure = sum / 50.0f;
 
   if (!adxl.begin()) { Serial.println("ADXL375 not found"); while (1); }
+
+  // 9-DoF init parks LOUD on failure, same policy as the other sensors: the sled
+  // does not fly with half its sensor suite silently absent. (Flagged for review:
+  // an argument exists that telemetry-enrichment sensors should degrade instead.)
+  if (!lsm6ds.begin_I2C(0x6a)) { Serial.println("LSM6DSOX not found"); while (1); }
+  lsm6ds.setGyroRange(LSM6DS_GYRO_RANGE_2000_DPS);   // A1.4: ±2000 dps FS
+  lsm6ds.setGyroDataRate(LSM6DS_RATE_104_HZ);
+  if (!lis3mdl.begin_I2C(0x1c)) { Serial.println("LIS3MDL not found"); while (1); }
+  lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);           // A1.4: ±4 gauss -> ±478.9 µT
+  lis3mdl.setDataRate(LIS3MDL_DATARATE_40_HZ);
   Serial.println("Sled TX ready (ADR v1)");
 #ifdef BENCH_FORCE_FAST_TX
   // Evidence must describe the artifact: this build says what it is, every boot.
@@ -199,6 +224,24 @@ void loop() {
     lastG = accel_magnitude_g(e.acceleration.x, e.acceleration.y, e.acceleration.z);
     gEnv.note(lastG);   // every sample reaches the envelope; TX consumes it below
 
+    // 9-DoF sample: gyro feeds the Wmx envelope every tick (that is what makes the
+    // flight tag alias-free); the raw values are kept for the 1 Hz pad frame. The
+    // driver returns SI rad/s — the wire wants dps (A1.4).
+    // Health notes deliberately absent pending driver return-semantics inspection:
+    // a health signal wired to an unconditional-true getEvent would be a check that
+    // cannot fail (see sensor_health.h on the ADXL).
+    sensors_event_t la, lg, lt;
+    lsm6ds.getEvent(&la, &lg, &lt);
+    lastGyx = lg.gyro.x * RAD_TO_DEG;
+    lastGyy = lg.gyro.y * RAD_TO_DEG;
+    lastGyz = lg.gyro.z * RAD_TO_DEG;
+    wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
+    sensors_event_t m;
+    lis3mdl.getEvent(&m);
+    lastMgx = m.magnetic.x;   // already µT
+    lastMgy = m.magnetic.y;
+    lastMgz = m.magnetic.z;
+
     // launch_ms() is BACKDATED to the accel gate, so the confirmation window buys robustness
     // without moving MET zero. Using `now` here would charge MET for the whole window.
     if (launchDet.update(lastG, lastAltFt, baroOk, now)) {
@@ -257,6 +300,11 @@ void loop() {
       p.vel_fps = velEst.vel_fps();
       p.gmx     = gEnv.gmx();
       p.gmn     = gEnv.gmn();
+      // E+F tail: the encoder derives the shape from p.state (pad tail iff St:0),
+      // so every field is filled and the wire carries what the shape selects.
+      p.wmx = wEnv.gmx();
+      p.gyx = lastGyx; p.gyy = lastGyy; p.gyz = lastGyz;
+      p.mgx = lastMgx; p.mgy = lastMgy; p.mgz = lastMgz;
 
       // 256 B: TODAY's worst case is 141 B (12 tags + Vel/Gmx/Gmn — pinned by
       // test_worst_case_frame_is_141_bytes_per_adr0005). Wmx and the raw 9-DoF pad
@@ -279,6 +327,7 @@ void loop() {
         gEnv.reset();                  // the window's values are ON AIR — and only now:
                                        // an encode drop above keeps accumulating, so the
                                        // spike is not lost with the frame
+        wEnv.reset();                  // same discipline for the gyro envelope
       }
       seq = (seq + 1) & 0xFFFF;   // wrap at 65535 per ADR; NOT reached on SKIP
     }

@@ -1,0 +1,44 @@
+# Both guard suites, run by a MACHINE on every push — red-team finding 8: the
+# cross-end RF guard and the native suite executed only when a human remembered,
+# which is the designed-but-inert class this repo already tracks. A guard that
+# runs on push cannot be forgotten.
+#
+# STATUS HONESTY: this workflow is UNVERIFIED until the first push executes it
+# (evidence must describe the running artifact). If a job fails on
+# environment rather than substance, fix the environment here — do not delete
+# the guard.
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Host logic tests (native env)
+        working-directory: firmware
+        run: pio test -e native
+
+  ground:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        # pillow: OLED render tests; pytest: imported by panel heartbeat tests.
+        # lgpio is deliberately absent — it is a Pi-only runtime dep and no test
+        # module imports it (verified 2026-08-25; if a future test does, it will
+        # fail HERE loudly rather than being skipped silently).
+        run: pip install pillow pytest
+      - name: Ground suite (includes the cross-end RF guard)
+        run: python -m unittest discover -s ground -t .

@@ -180,8 +180,18 @@ class FlightSegmenter:
         gaps, last_seq = fl["gaps"], fl["last_seq"]
         if seq is not None:            # a frame without SEQ consumed no sequence number
             if last_seq is not None:
-                gaps += (seq - last_seq - 1) % 65536   # uint16 wraparound-aware
-            last_seq = seq
+                d = (seq - last_seq - 1) % 65536       # uint16 wraparound-aware
+                # REORDER TOLERANCE (2026-08-25): a backwards or duplicate SEQ
+                # (d in the upper half-window) is a reordering artifact — a
+                # timestamp inversion upstream, never ~65k lost packets. Count
+                # nothing and keep last_seq, so the next in-order frame
+                # computes against the true high-water mark. Genuine uint16
+                # wraparound lands in the lower half-window and still counts.
+                if d < 32768:
+                    gaps += d
+                    last_seq = seq
+            else:
+                last_seq = seq
 
         fl.update(t_end_iso=received_at, t_end=t, packets=fl["packets"] + 1,
                   peak_alt=peak, rssi_min=rssi_min, rssi_max=rssi_max,

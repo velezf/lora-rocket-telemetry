@@ -93,6 +93,13 @@ suspect, not as data.** Fix path (queued WITH the I2C work, after the bench): ra
 reads carrying real I2C status → `sensors::Health` enrollment → in-loop degrade
 flags. Recorded here so the gap is a named hazard, not a code comment.
 
+**STATUS 2026-08-25, later the same day: RETIRED ON `feat/i2c-hardening` (bench
+pending).** The 9-DoF data path now reads registers through `Adafruit_I2CDevice`
+(real I2C status): a failed read updates nothing, `sensors::Health` counts it
+(IMU6/MAG enrolled), and sustained failure drops the tags from frames in flight —
+the health verdicts and failure counts ride the serial RATE line. The Epic 5
+caution about constant spin traces in EXISTING records still stands.
+
 ### `feat/firmware-9dof` — BUILT, RED-TEAMED, BENCH-VERIFIED 2026-08-25
 
 The queued 9-DoF branch is done and live on the bench: E+F frame split (shape

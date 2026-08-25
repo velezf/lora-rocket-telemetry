@@ -26,9 +26,12 @@
 // read success; they do not). Wiring health to an unconditional-true return would be
 // a check that cannot fail. The obvious heuristic — zero magnitude means dead
 // sensor — is FLIGHT-UNSAFE: a coasting rocket is ballistic and legitimately reads
-// ~0 g (sentinel colliding with a legal value). IMU6/MAG enrollment waits for a
-// raw-read path that carries real I2C status. Recorded here so nobody "fixes" the
-// gap with the zero-magnitude heuristic.
+// ~0 g (sentinel colliding with a legal value). IMU6/MAG are ENROLLED as of
+// feat/i2c-hardening: src/main.cpp reads their data registers through
+// Adafruit_I2CDevice, whose write_then_read returns real I2C status — a failed
+// read updates nothing, is counted here, and sustained failure drops the tags
+// from frames (in-flight degrade). Recorded here so nobody "fixes" the remaining
+// ADXL gap with the zero-magnitude heuristic.
 
 namespace sensors {
 

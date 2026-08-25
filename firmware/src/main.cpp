@@ -28,6 +28,8 @@
 #include <Adafruit_ADXL375.h>
 #include <Adafruit_LSM6DSOX.h>
 #include <Adafruit_LIS3MDL.h>
+#include <Adafruit_I2CDevice.h>
+#include <ninedof.h>
 
 #include <packet.h>
 #include <txgate.h>
@@ -58,6 +60,12 @@ Adafruit_ADXL375 adxl(0x53, &Wire);
 // addresses; that confusion cost an agent twenty minutes once).
 Adafruit_LSM6DSOX lsm6ds;
 Adafruit_LIS3MDL  lis3mdl;
+// Raw-read devices for the 9-DoF DATA path (feat/i2c-hardening): the vendored
+// getEvent()s discard I2C status (RESUME's named hazard), so data reads go through
+// these, which return real success — feeding sensors::Health and the in-loop
+// degrade below. The driver objects above still own init/config.
+Adafruit_I2CDevice imu6Dev(0x6a, &Wire);
+Adafruit_I2CDevice magDev(0x1c, &Wire);
 
 // Confirmed launch: CONFIRM-OR-REVERT. The accel gate (3 g held 100 ms) only decides when to
 // START watching altitude; the ALTITUDE GAIN is what declares the launch, and a provisional
@@ -211,6 +219,9 @@ void setup() {
   } else {
     Serial.println("LIS3MDL not found — DEGRADED: flying without Mg? tags");
   }
+  // Raw-read handles for the data path (status-bearing; drivers above did config).
+  if (imu6Ok) imu6Ok = imu6Dev.begin();
+  if (magOk)  magOk  = magDev.begin();
   Serial.println("Sled TX ready (ADR v1)");
 #ifdef BENCH_FORCE_FAST_TX
   // Evidence must describe the artifact: this build says what it is, every boot.
@@ -284,20 +295,31 @@ void loop() {
     // Health notes deliberately absent pending driver return-semantics inspection:
     // a health signal wired to an unconditional-true getEvent would be a check that
     // cannot fail (see sensor_health.h on the ADXL).
+    // 9-DoF via STATUS-BEARING raw reads (retires RESUME's silent-death hazard):
+    // a failed read updates NOTHING (no stale/fabricated values) and is counted by
+    // sensors::Health; sustained failure drops the tags from frames below.
     if (imu6Ok) {
-      sensors_event_t la, lg, lt;
-      lsm6ds.getEvent(&la, &lg, &lt);
-      lastGyx = lg.gyro.x * RAD_TO_DEG;
-      lastGyy = lg.gyro.y * RAD_TO_DEG;
-      lastGyz = lg.gyro.z * RAD_TO_DEG;
-      wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
+      uint8_t reg = 0x22;                      // LSM6DSOX OUTX_L_G, 6 bytes LE
+      uint8_t buf[6];
+      const bool ok = imu6Dev.write_then_read(&reg, 1, buf, 6);
+      sensorHealth.note(sensors::IMU6, ok, now);
+      if (ok) {
+        lastGyx = ninedof::gyro_raw_to_dps(ninedof::le16(buf));
+        lastGyy = ninedof::gyro_raw_to_dps(ninedof::le16(buf + 2));
+        lastGyz = ninedof::gyro_raw_to_dps(ninedof::le16(buf + 4));
+        wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
+      }
     }
     if (magOk) {
-      sensors_event_t m;
-      lis3mdl.getEvent(&m);
-      lastMgx = m.magnetic.x;   // already µT
-      lastMgy = m.magnetic.y;
-      lastMgz = m.magnetic.z;
+      uint8_t reg = 0x28 | 0x80;               // LIS3MDL OUT_X_L, bit7 = auto-inc
+      uint8_t buf[6];
+      const bool ok = magDev.write_then_read(&reg, 1, buf, 6);
+      sensorHealth.note(sensors::MAG, ok, now);
+      if (ok) {
+        lastMgx = ninedof::mag_raw_to_ut(ninedof::le16(buf));
+        lastMgy = ninedof::mag_raw_to_ut(ninedof::le16(buf + 2));
+        lastMgz = ninedof::mag_raw_to_ut(ninedof::le16(buf + 4));
+      }
     }
 
     // launch_ms() is BACKDATED to the accel gate, so the confirmation window buys robustness
@@ -363,8 +385,11 @@ void loop() {
       p.wmx = wEnv.gmx();
       p.gyx = lastGyx; p.gyy = lastGyy; p.gyz = lastGyz;
       p.mgx = lastMgx; p.mgy = lastMgy; p.mgz = lastMgz;
-      p.has_imu6 = imu6Ok;   // degraded sensors drop their tags in the encoder
-      p.has_mag  = magOk;
+      // IN-FLIGHT degrade, not just init-time: a sensor that stops answering goes
+      // unhealthy (time since last GOOD read — sensor_health.h) and its tags drop
+      // from frames. Frozen-or-fabricated spin can no longer masquerade as data.
+      p.has_imu6 = imu6Ok && sensorHealth.healthy(sensors::IMU6, now);
+      p.has_mag  = magOk && sensorHealth.healthy(sensors::MAG, now);
 
       // 256 B: above A1.4's worst cases — 152 B flight / 210 B pad, BOTH SHAPES NOW
       // EMITTED — pinned by test_worst_case_sizes_per_adr0005_a14, with the magnitude
@@ -402,6 +427,10 @@ void loop() {
       // caller — designed-but-inert). 0 here on the bench means the baro has not
       // answered within stale_ms even if the failure count looks small.
       Serial.print(", baro healthy "); Serial.print(sensorHealth.healthy(sensors::BARO, now) ? 1 : 0);
+      Serial.print(", imu6 fails "); Serial.print(sensorHealth.failures(sensors::IMU6));
+      Serial.print(" healthy "); Serial.print(sensorHealth.healthy(sensors::IMU6, now) ? 1 : 0);
+      Serial.print(", mag fails "); Serial.print(sensorHealth.failures(sensors::MAG));
+      Serial.print(" healthy "); Serial.print(sensorHealth.healthy(sensors::MAG, now) ? 1 : 0);
       // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
       // telling you it was knocked -- and that it correctly declined to call it a launch.
       Serial.print(", launch reverts "); Serial.print(launchDet.reverts());

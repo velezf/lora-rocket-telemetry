@@ -72,7 +72,21 @@ mid-I2C-transaction far more often than the old 1 Hz build, BMP390 holds SDA low
 `begin_I2C()` fails, app parks in its init `while(1)` — which would explain why
 months of flashing never showed this before today. Not flight-risk (a pad battery
 connect IS a power cycle); dev workaround: power-cycle after every flash.
-**Candidate fix, queued: I2C bus-clear (9 SCL pulses) before `Wire.begin()`.**
+**Candidate fix: I2C bus-clear (9 SCL pulses) before `Wire.begin()` — BUILT on
+`feat/i2c-hardening` (2026-08-25), deliberately as an INSTRUMENT too:** it prints
+"clean" or "SDA STUCK LOW, released after N pulses" on every boot, so the next
+post-flash boot either catches the hypothesized mechanism in the act or, over many
+flashes of silence, argues against it.
+
+**BENCH 2026-08-25 (`e8f2f4a` flashed): the FIRST post-flash boot since the 20 Hz
+firmware that needed NO power cycle** — board came up unaided, verdict `i2c boot
+clean` (three-state after red team F2: clean / SDA-stuck-released / SCL-stuck,
+persisted on every RATE line per F4, so a missed boot print no longer loses the
+evidence). ONE data point — the bus happened not to be stuck this boot; the
+question closes as the verdicts accumulate across future flashes. Mag re-proven
+on the changed 0xA8 transaction (F3): three distinct axes, |B| ≈ 40.8 µT,
+matching pre-swap. `imu6/mag fails+healthy` live on the RATE line. The
+power-cycle ritual stays the fallback until the verdict history says otherwise.
 
 **Also observed, hypothesis only: detaching a USB serial monitor stalls the sled
 ~1 s** (two zero-loss 1 s TX pauses, plausibly correlated with monitor detach;
@@ -88,6 +102,13 @@ no health note, and no wire evidence. **Epic 5 must treat a constant spin trace 
 suspect, not as data.** Fix path (queued WITH the I2C work, after the bench): raw
 reads carrying real I2C status → `sensors::Health` enrollment → in-loop degrade
 flags. Recorded here so the gap is a named hazard, not a code comment.
+
+**STATUS 2026-08-25, later the same day: RETIRED ON `feat/i2c-hardening` (bench
+pending).** The 9-DoF data path now reads registers through `Adafruit_I2CDevice`
+(real I2C status): a failed read updates nothing, `sensors::Health` counts it
+(IMU6/MAG enrolled), and sustained failure drops the tags from frames in flight —
+the health verdicts and failure counts ride the serial RATE line. The Epic 5
+caution about constant spin traces in EXISTING records still stands.
 
 ### `feat/firmware-9dof` — BUILT, RED-TEAMED, BENCH-VERIFIED 2026-08-25
 

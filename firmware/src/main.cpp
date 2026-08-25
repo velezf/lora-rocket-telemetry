@@ -28,6 +28,8 @@
 #include <Adafruit_ADXL375.h>
 #include <Adafruit_LSM6DSOX.h>
 #include <Adafruit_LIS3MDL.h>
+#include <Adafruit_I2CDevice.h>
+#include <ninedof.h>
 
 #include <packet.h>
 #include <txgate.h>
@@ -58,6 +60,12 @@ Adafruit_ADXL375 adxl(0x53, &Wire);
 // addresses; that confusion cost an agent twenty minutes once).
 Adafruit_LSM6DSOX lsm6ds;
 Adafruit_LIS3MDL  lis3mdl;
+// Raw-read devices for the 9-DoF DATA path (feat/i2c-hardening): the vendored
+// getEvent()s discard I2C status (RESUME's named hazard), so data reads go through
+// these, which return real success — feeding sensors::Health and the in-loop
+// degrade below. The driver objects above still own init/config.
+Adafruit_I2CDevice imu6Dev(0x6a, &Wire);
+Adafruit_I2CDevice magDev(0x1c, &Wire);
 
 // Confirmed launch: CONFIRM-OR-REVERT. The accel gate (3 g held 100 ms) only decides when to
 // START watching altitude; the ALTITUDE GAIN is what declares the launch, and a provisional
@@ -104,6 +112,67 @@ float readBatteryVoltage() {
   return raw * 3.3f / 1023.0f * 2.0f;
 }
 
+// ---- I2C bus-clear (fix for the reproducible flash-reset wedge) ----
+// A reset landing mid-I2C-transaction can leave a slave driving SDA low, and no
+// CPU reset clears that — only clocking the slave's shift register out does.
+// Standard remedy: up to 9 SCL pulses until SDA releases, then a STOP. Runs
+// BEFORE any Wire init, and REPORTS — deliberately an INSTRUMENT as well as a
+// fix: RESUME's wedge mechanism is a hypothesis, and "SDA STUCK LOW" printed on
+// a post-flash boot is that hypothesis caught in the act (or, never printing
+// across many flashes, evidence against it).
+// Persisted verdict, echoed on EVERY RATE line (red team F4: a one-shot boot print
+// lands in exactly the post-flash observation gap that already ate two failure
+// lines; standing evidence survives a missed print).
+static const char *i2cBootVerdict = "unknown";
+
+static void i2cBusClear() {
+  pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
+  pinMode(PIN_WIRE_SCL, INPUT_PULLUP);
+  delayMicroseconds(10);
+  if (digitalRead(PIN_WIRE_SCL) == LOW) {
+    // Clock-stretch wedge: a slave holding SCL cannot be cleared from the master
+    // side at all — pulsing is pointless. REPORTED as its own state (red team F2:
+    // the old check sampled SDA only, and would have printed "clean" during a real
+    // SCL wedge — an instrument feeding the wrong arm of its own experiment).
+    i2cBootVerdict = "SCL-STUCK(power-cycle)";
+    Serial.println("I2C bus: SCL STUCK LOW at boot — unclearable from master, power-cycle needed");
+    return;
+  }
+  if (digitalRead(PIN_WIRE_SDA) == HIGH) {
+    i2cBootVerdict = "clean";
+    Serial.println("I2C bus: clean at boot");
+    return;
+  }
+  // SDA held low: clock the slave's shift register out, up to 9 SCL cycles.
+  // DRIVE ORDER (red team F5): OUT is set LOW while the pin is still an input, so
+  // becoming an output drives low from the first edge — SAMD pinMode(OUTPUT) does
+  // not touch OUT, and the old order push-pull-drove HIGH for a moment. The high
+  // phase is pull-up only; pinMode(INPUT_PULLUP) restores OUT=1 itself.
+  int pulses = 0;
+  for (; pulses < 9 && digitalRead(PIN_WIRE_SDA) == LOW; pulses++) {
+    digitalWrite(PIN_WIRE_SCL, LOW);
+    pinMode(PIN_WIRE_SCL, OUTPUT);
+    delayMicroseconds(5);
+    pinMode(PIN_WIRE_SCL, INPUT_PULLUP);
+    delayMicroseconds(5);
+  }
+  const bool released = (digitalRead(PIN_WIRE_SDA) == HIGH);
+  if (released) {
+    // START-then-STOP, named for what it is (red team F5): SDA driven low then
+    // released while SCL is high — the standard bus-clear closure.
+    digitalWrite(PIN_WIRE_SDA, LOW);
+    pinMode(PIN_WIRE_SDA, OUTPUT);
+    delayMicroseconds(5);
+    pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
+    delayMicroseconds(5);
+  }
+  i2cBootVerdict = released ? "SDA-was-stuck-RELEASED" : "SDA-STILL-STUCK";
+  Serial.print("I2C bus: SDA STUCK LOW at boot, ");
+  Serial.print(released ? "released after " : "STILL STUCK after ");
+  Serial.print(pulses);
+  Serial.println(" SCL pulses");
+}
+
 void setup() {
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
@@ -128,6 +197,8 @@ void setup() {
   // from the shared constant, not assumed from power-on state.
   rf95.spiWrite(RH_RF95_REG_39_SYNC_WORD, rf::SYNC_WORD);
   rf95.setTxPower(rf::TX_POWER_DBM, false);
+
+  i2cBusClear();   // BEFORE any Wire user — see the function's why-and-instrument note
 
   if (!bmp.begin_I2C()) { Serial.println("BMP390 not found"); while (1); }
   // 1x oversampling, NOT temp-off: BMP3 pressure compensation REQUIRES the temperature
@@ -171,6 +242,9 @@ void setup() {
   } else {
     Serial.println("LIS3MDL not found — DEGRADED: flying without Mg? tags");
   }
+  // Raw-read handles for the data path (status-bearing; drivers above did config).
+  if (imu6Ok) imu6Ok = imu6Dev.begin();
+  if (magOk)  magOk  = magDev.begin();
   Serial.println("Sled TX ready (ADR v1)");
 #ifdef BENCH_FORCE_FAST_TX
   // Evidence must describe the artifact: this build says what it is, every boot.
@@ -244,20 +318,36 @@ void loop() {
     // Health notes deliberately absent pending driver return-semantics inspection:
     // a health signal wired to an unconditional-true getEvent would be a check that
     // cannot fail (see sensor_health.h on the ADXL).
+    // 9-DoF via STATUS-BEARING raw reads (retires RESUME's silent-death hazard):
+    // a failed read updates NOTHING (no stale/fabricated values) and is counted by
+    // sensors::Health; sustained failure drops the tags from frames below.
     if (imu6Ok) {
-      sensors_event_t la, lg, lt;
-      lsm6ds.getEvent(&la, &lg, &lt);
-      lastGyx = lg.gyro.x * RAD_TO_DEG;
-      lastGyy = lg.gyro.y * RAD_TO_DEG;
-      lastGyz = lg.gyro.z * RAD_TO_DEG;
-      wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
+      uint8_t reg = 0x22;                      // LSM6DSOX OUTX_L_G, 6 bytes LE
+      uint8_t buf[6];
+      const bool ok = imu6Dev.write_then_read(&reg, 1, buf, 6);
+      sensorHealth.note(sensors::IMU6, ok, now);
+      if (ok) {
+        lastGyx = ninedof::gyro_raw_to_dps(ninedof::le16(buf));
+        lastGyy = ninedof::gyro_raw_to_dps(ninedof::le16(buf + 2));
+        lastGyz = ninedof::gyro_raw_to_dps(ninedof::le16(buf + 4));
+        wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
+      }
     }
     if (magOk) {
-      sensors_event_t m;
-      lis3mdl.getEvent(&m);
-      lastMgx = m.magnetic.x;   // already µT
-      lastMgy = m.magnetic.y;
-      lastMgz = m.magnetic.z;
+      // LIS3MDL OUT_X_L with SUB(7)=1: the DATASHEET-required multi-byte form.
+      // NOTE (red team F3): the vendored driver empirically used plain 0x28 over
+      // I2C (BusIO passes the subaddress verbatim; its auto-inc bit logic is
+      // SPI-only), so this TRANSACTION differs from the one the 9-DoF bench
+      // proved — mag axes re-proven on THIS build's bench before trusting.
+      uint8_t reg = 0x28 | 0x80;
+      uint8_t buf[6];
+      const bool ok = magDev.write_then_read(&reg, 1, buf, 6);
+      sensorHealth.note(sensors::MAG, ok, now);
+      if (ok) {
+        lastMgx = ninedof::mag_raw_to_ut(ninedof::le16(buf));
+        lastMgy = ninedof::mag_raw_to_ut(ninedof::le16(buf + 2));
+        lastMgz = ninedof::mag_raw_to_ut(ninedof::le16(buf + 4));
+      }
     }
 
     // launch_ms() is BACKDATED to the accel gate, so the confirmation window buys robustness
@@ -323,8 +413,15 @@ void loop() {
       p.wmx = wEnv.gmx();
       p.gyx = lastGyx; p.gyy = lastGyy; p.gyz = lastGyz;
       p.mgx = lastMgx; p.mgy = lastMgy; p.mgz = lastMgz;
-      p.has_imu6 = imu6Ok;   // degraded sensors drop their tags in the encoder
-      p.has_mag  = magOk;
+      // IN-FLIGHT degrade, not just init-time: a sensor that stops answering goes
+      // unhealthy (time since last GOOD read — sensor_health.h) and its tags drop
+      // from frames. Frozen-or-fabricated spin can no longer masquerade as data.
+      // Honest bound (red team F6): up to stale_ms (500 ms, ~5 flight frames) of
+      // LAST-GOOD values still ride with tags present before the verdict flips —
+      // inherent to time-based health, stated so nobody reads "a failed read
+      // updates nothing" as "no stale value ever ships".
+      p.has_imu6 = imu6Ok && sensorHealth.healthy(sensors::IMU6, now);
+      p.has_mag  = magOk && sensorHealth.healthy(sensors::MAG, now);
 
       // 256 B: above A1.4's worst cases — 152 B flight / 210 B pad, BOTH SHAPES NOW
       // EMITTED — pinned by test_worst_case_sizes_per_adr0005_a14, with the magnitude
@@ -362,6 +459,14 @@ void loop() {
       // caller — designed-but-inert). 0 here on the bench means the baro has not
       // answered within stale_ms even if the failure count looks small.
       Serial.print(", baro healthy "); Serial.print(sensorHealth.healthy(sensors::BARO, now) ? 1 : 0);
+      Serial.print(", imu6 fails "); Serial.print(sensorHealth.failures(sensors::IMU6));
+      Serial.print(" healthy "); Serial.print(sensorHealth.healthy(sensors::IMU6, now) ? 1 : 0);
+      Serial.print(", mag fails "); Serial.print(sensorHealth.failures(sensors::MAG));
+      Serial.print(" healthy "); Serial.print(sensorHealth.healthy(sensors::MAG, now) ? 1 : 0);
+      // healthy is the LOAD-BEARING half of these pairs (red team F7): an
+      // init-dead sensor attempts no reads, so its fails stays 0 forever while
+      // healthy correctly reads 0. The bus verdict repeats here per F4.
+      Serial.print(", i2c boot "); Serial.print(i2cBootVerdict);
       // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
       // telling you it was knocked -- and that it correctly declined to call it a launch.
       Serial.print(", launch reverts "); Serial.print(launchDet.reverts());

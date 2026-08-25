@@ -31,9 +31,16 @@ struct Packet {
     // St:0 emits the PAD tail (raw 9-DoF — Epic 5's calibration record), anything
     // else emits the FLIGHT tail (Wmx). There is no shape field, so shape and
     // flight state cannot disagree — by construction, not by discipline.
-    float          wmx;     // Wmx  TX-window max |gyro|, dps (flight frames; ±2293.8 FS)
-    float          gyx, gyy, gyz;  // Gy?  raw gyro, dps (pad frames)
-    float          mgx, mgy, mgz;  // Mg?  raw mag, µT (pad frames; ±478.9 FS)
+    float          wmx;     // Wmx  TX-window max |gyro| MAGNITUDE, dps — worst is
+                            //      √3 × 2293.8 ≈ 3973.0, not the per-axis FS (A1.4,
+                            //      corrected 2026-08-25; Gmx/Gmn likewise ≈ 346.4 g)
+    float          gyx, gyy, gyz;  // Gy?  raw gyro, dps (pad frames; ±2293.8/axis)
+    float          mgx, mgy, mgz;  // Mg?  raw mag, µT (pad frames; ±478.9/axis)
+    // DEGRADE, NOT PARK (red-team finding 1): a dead enrichment sensor drops its
+    // tags — missing tags are v1-legal (ADR 0001) — and the frame still flies.
+    // false omits: has_imu6 -> Wmx and Gy?; has_mag -> Mg?.
+    bool           has_imu6;
+    bool           has_mag;
 };
 
 // Encode `p` into `out` (capacity `out_len`) as an ADR-0001 v1 packet string.

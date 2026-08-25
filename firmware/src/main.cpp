@@ -90,6 +90,9 @@ envelope::Window wEnv;
 // stationary calibration record (A1.3: raw channels belong on the pad, not in flight).
 static float lastGyx = 0, lastGyy = 0, lastGyz = 0;
 static float lastMgx = 0, lastMgy = 0, lastMgz = 0;
+// DEGRADE, NOT PARK (red-team finding 1, disposition 2026-08-25): a failed
+// enrichment-sensor init drops that sensor's tags instead of parking the sled.
+static bool imu6Ok = false, magOk = false;
 
 float groundPressure = 1013.25f;  // hPa, calibrated at boot
 float peakG = 0.0f;
@@ -148,15 +151,26 @@ void setup() {
 
   if (!adxl.begin()) { Serial.println("ADXL375 not found"); while (1); }
 
-  // 9-DoF init parks LOUD on failure, same policy as the other sensors: the sled
-  // does not fly with half its sensor suite silently absent. (Flagged for review:
-  // an argument exists that telemetry-enrichment sensors should degrade instead.)
-  if (!lsm6ds.begin_I2C(0x6a)) { Serial.println("LSM6DSOX not found"); while (1); }
-  lsm6ds.setGyroRange(LSM6DS_GYRO_RANGE_2000_DPS);   // A1.4: ±2000 dps FS
-  lsm6ds.setGyroDataRate(LSM6DS_RATE_104_HZ);
-  if (!lis3mdl.begin_I2C(0x1c)) { Serial.println("LIS3MDL not found"); while (1); }
-  lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);           // A1.4: ±4 gauss -> ±478.9 µT
-  lis3mdl.setDataRate(LIS3MDL_DATARATE_40_HZ);
+  // 9-DoF init DEGRADES on failure, LOUDLY (red-team finding 1, Frank's disposition
+  // 2026-08-25): these sensors enrich Epic 5's dataset but feed no flight decision,
+  // so a dead one drops ITS tags (missing tags are v1-legal) instead of holding the
+  // sled hostage in while(1) at the pad — where a battery connect is a power cycle
+  // and the reset wedge is a known repeat offender. BMP390/ADXL stay loud parks
+  // above: they ARE flight decisions.
+  imu6Ok = lsm6ds.begin_I2C(0x6a);
+  if (imu6Ok) {
+    lsm6ds.setGyroRange(LSM6DS_GYRO_RANGE_2000_DPS); // A1.4: ±2000 dps/axis FS
+    lsm6ds.setGyroDataRate(LSM6DS_RATE_104_HZ);
+  } else {
+    Serial.println("LSM6DSOX not found — DEGRADED: flying without Wmx/Gy? tags");
+  }
+  magOk = lis3mdl.begin_I2C(0x1c);
+  if (magOk) {
+    lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);         // A1.4: ±4 gauss -> ±478.9 µT
+    lis3mdl.setDataRate(LIS3MDL_DATARATE_40_HZ);
+  } else {
+    Serial.println("LIS3MDL not found — DEGRADED: flying without Mg? tags");
+  }
   Serial.println("Sled TX ready (ADR v1)");
 #ifdef BENCH_FORCE_FAST_TX
   // Evidence must describe the artifact: this build says what it is, every boot.
@@ -230,17 +244,21 @@ void loop() {
     // Health notes deliberately absent pending driver return-semantics inspection:
     // a health signal wired to an unconditional-true getEvent would be a check that
     // cannot fail (see sensor_health.h on the ADXL).
-    sensors_event_t la, lg, lt;
-    lsm6ds.getEvent(&la, &lg, &lt);
-    lastGyx = lg.gyro.x * RAD_TO_DEG;
-    lastGyy = lg.gyro.y * RAD_TO_DEG;
-    lastGyz = lg.gyro.z * RAD_TO_DEG;
-    wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
-    sensors_event_t m;
-    lis3mdl.getEvent(&m);
-    lastMgx = m.magnetic.x;   // already µT
-    lastMgy = m.magnetic.y;
-    lastMgz = m.magnetic.z;
+    if (imu6Ok) {
+      sensors_event_t la, lg, lt;
+      lsm6ds.getEvent(&la, &lg, &lt);
+      lastGyx = lg.gyro.x * RAD_TO_DEG;
+      lastGyy = lg.gyro.y * RAD_TO_DEG;
+      lastGyz = lg.gyro.z * RAD_TO_DEG;
+      wEnv.note(sqrtf(lastGyx * lastGyx + lastGyy * lastGyy + lastGyz * lastGyz));
+    }
+    if (magOk) {
+      sensors_event_t m;
+      lis3mdl.getEvent(&m);
+      lastMgx = m.magnetic.x;   // already µT
+      lastMgy = m.magnetic.y;
+      lastMgz = m.magnetic.z;
+    }
 
     // launch_ms() is BACKDATED to the accel gate, so the confirmation window buys robustness
     // without moving MET zero. Using `now` here would charge MET for the whole window.
@@ -305,13 +323,16 @@ void loop() {
       p.wmx = wEnv.gmx();
       p.gyx = lastGyx; p.gyy = lastGyy; p.gyz = lastGyz;
       p.mgx = lastMgx; p.mgy = lastMgy; p.mgz = lastMgz;
+      p.has_imu6 = imu6Ok;   // degraded sensors drop their tags in the encoder
+      p.has_mag  = magOk;
 
-      // 256 B: TODAY's worst case is 141 B (12 tags + Vel/Gmx/Gmn — pinned by
-      // test_worst_case_frame_is_141_bytes_per_adr0005). Wmx and the raw 9-DoF pad
-      // tags are NOT yet emitted (no LSM6DSOX driver in src/), so A1.4's 210 B pad
-      // frame is what this buffer is sized AHEAD for, under the 251 B
-      // RH_RF95_MAX_MESSAGE_LEN send cap. If a range assumption grows, the A1.4
-      // table and the pinned length move together or encode_packet returns 0 below.
+      // 256 B: above A1.4's worst cases — 152 B flight / 210 B pad, BOTH SHAPES NOW
+      // EMITTED — pinned by test_worst_case_sizes_per_adr0005_a14, with the magnitude
+      // worst-forms (Wmx 3973.0, Gmx/Gmn 346.4 — vector magnitudes exceed per-axis FS)
+      // pinned separately: same formatted lengths, a checked coincidence rather than a
+      // silent one. Frames stay under the 251 B RH_RF95_MAX_MESSAGE_LEN send cap. If a
+      // range assumption grows, the A1.4 table and the pins move together or
+      // encode_packet returns 0 below.
       char msg[256];
       size_t n = encode_packet(p, msg, sizeof(msg));
       if (n == 0) {

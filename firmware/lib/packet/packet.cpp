@@ -40,19 +40,42 @@ size_t encode_packet(const Packet& p, char* out, size_t out_len) {
     // E+F tail, derived from St (A1.3): pad frames carry the raw 9-DoF channels —
     // the stationary calibration record — and flight frames carry the Wmx envelope
     // (instantaneous gyro at 10 Hz would alias; the window max survives any TX rate).
+    // DEGRADE, NOT PARK: a dead enrichment sensor's tags are simply absent —
+    // missing tags are v1-legal — so each tail piece is gated on its has_ flag,
+    // and every append keeps the LOUD-truncation contract.
+    size_t pos = static_cast<size_t>(n);
     int t;
     if (p.state == 0) {
-        t = snprintf(out + n, out_len - n,
-                     " Gyx:%.1f Gyy:%.1f Gyz:%.1f Mgx:%.1f Mgy:%.1f Mgz:%.1f",
-                     static_cast<double>(p.gyx), static_cast<double>(p.gyy),
-                     static_cast<double>(p.gyz), static_cast<double>(p.mgx),
-                     static_cast<double>(p.mgy), static_cast<double>(p.mgz));
-    } else {
-        t = snprintf(out + n, out_len - n, " Wmx:%.1f", static_cast<double>(p.wmx));
+        if (p.has_imu6) {
+            t = snprintf(out + pos, out_len - pos,
+                         " Gyx:%.1f Gyy:%.1f Gyz:%.1f",
+                         static_cast<double>(p.gyx), static_cast<double>(p.gyy),
+                         static_cast<double>(p.gyz));
+            if (t < 0 || static_cast<size_t>(t) >= out_len - pos) {
+                out[0] = '\0';
+                return 0;
+            }
+            pos += static_cast<size_t>(t);
+        }
+        if (p.has_mag) {
+            t = snprintf(out + pos, out_len - pos,
+                         " Mgx:%.1f Mgy:%.1f Mgz:%.1f",
+                         static_cast<double>(p.mgx), static_cast<double>(p.mgy),
+                         static_cast<double>(p.mgz));
+            if (t < 0 || static_cast<size_t>(t) >= out_len - pos) {
+                out[0] = '\0';
+                return 0;
+            }
+            pos += static_cast<size_t>(t);
+        }
+    } else if (p.has_imu6) {
+        t = snprintf(out + pos, out_len - pos, " Wmx:%.1f",
+                     static_cast<double>(p.wmx));
+        if (t < 0 || static_cast<size_t>(t) >= out_len - pos) {
+            out[0] = '\0';
+            return 0;
+        }
+        pos += static_cast<size_t>(t);
     }
-    if (t < 0 || static_cast<size_t>(t) >= out_len - n) {
-        out[0] = '\0';
-        return 0;
-    }
-    return static_cast<size_t>(n + t);
+    return pos;
 }

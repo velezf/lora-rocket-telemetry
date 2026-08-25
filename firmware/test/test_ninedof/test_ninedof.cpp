@@ -1,4 +1,7 @@
 #include <unity.h>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 #include "ninedof.h"
 
 void setUp(void) {}
@@ -39,9 +42,46 @@ void test_le16_parses_sign_correctly(void) {
     TEST_ASSERT_EQUAL_INT16(-1,     ninedof::le16(m1));
 }
 
+// --- INDEPENDENT equivalence check against the VENDORED pipeline (red team F1:
+// the tests above pin the same arithmetic the implementation uses — pattern #4 —
+// and could not catch the falsified "bit-identical" claim). This one emulates the
+// old path (vendored float rad/s intermediate, then double RAD_TO_DEG) and bounds
+// the numeric deviation; it also PINS the known formatting divergence at the red
+// team's exemplar raw, so nobody re-claims bit-identity. ---
+
+void test_numeric_equivalence_to_vendored_pipeline(void) {
+    float worst = 0.0f;
+    for (long r = -32768; r <= 32767; r += 7) {         // dense sweep incl. extremes
+        const int16_t raw = static_cast<int16_t>(r);
+        const float rads = raw * 70.0f * 0.017453293f / 1000.0f;   // vendored, float
+        const float old_dps = static_cast<float>(
+            static_cast<double>(rads) * 57.29577951308232);        // old RAD_TO_DEG
+        const float d = std::fabs(old_dps - ninedof::gyro_raw_to_dps(raw));
+        if (d > worst) worst = d;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(worst < 0.01f, "gyro paths diverge numerically");
+}
+
+void test_formatting_divergence_is_real_and_documented(void) {
+    // raw -32755: old formats -2292.8, new -2292.9 (verified two ways). If this
+    // ever passes as EQUAL, the pipelines converged and ninedof.h's honesty note
+    // should be revisited — either way, the claim stays pinned to measurement.
+    const int16_t raw = -32755;
+    const float rads = raw * 70.0f * 0.017453293f / 1000.0f;
+    const float old_dps = static_cast<float>(
+        static_cast<double>(rads) * 57.29577951308232);
+    char a[16], b[16];
+    snprintf(a, sizeof(a), "%.1f", static_cast<double>(old_dps));
+    snprintf(b, sizeof(b), "%.1f", static_cast<double>(ninedof::gyro_raw_to_dps(raw)));
+    TEST_ASSERT_TRUE_MESSAGE(strcmp(a, b) != 0,
+                             "pipelines now format identically — update ninedof.h note");
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_gyro_scale_matches_a14_derivation);
+    RUN_TEST(test_numeric_equivalence_to_vendored_pipeline);
+    RUN_TEST(test_formatting_divergence_is_real_and_documented);
     RUN_TEST(test_mag_scale_matches_a14_derivation);
     RUN_TEST(test_le16_parses_sign_correctly);
     return UNITY_END();

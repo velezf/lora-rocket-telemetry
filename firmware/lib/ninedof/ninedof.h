@@ -8,10 +8,16 @@
 // parse an uninitialized buffer (RESUME's named hazard: a dead sensor in flight
 // freezes or FABRICATES spin data with no wire evidence). src/main.cpp therefore
 // reads the data registers itself through Adafruit_I2CDevice, which reports real
-// I2C success, enabling sensors::Health enrollment and in-flight degrade. These
-// conversions reproduce the vendored drivers' scale factors EXACTLY (pinned by
-// test_ninedof against A1.4's own derivation), so the wire values do not change
-// meaning across the swap.
+// I2C success, enabling sensors::Health enrollment and in-flight degrade.
+//
+// EQUIVALENCE, STATED HONESTLY (red team F1 falsified the original "bit-identical"
+// claim): the MAG conversion is exhaustively identical to the vendored pipeline at
+// wire precision (0/65536 raws differ at %.1f). The GYRO conversion is NUMERICALLY
+// equivalent (max deviation ~2e-4 dps, bounded by test) but NOT format-identical:
+// the old path double-rounded through a float rad/s intermediate, and ~2.9 % of
+// raw values (1,884/65,536) land 0.1 dps away at %.1f. The direct value here is
+// the more correct one; a bench trace from a pre-swap build may legitimately
+// differ by 0.1 in Gy?/Wmx — that is this change, not a defect.
 //
 // Pure, portable C++ — no <Arduino.h>, no BusIO (lib/ purity rule).
 

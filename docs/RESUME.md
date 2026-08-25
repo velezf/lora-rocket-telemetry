@@ -54,6 +54,40 @@ RSSI against the post-pigtail baseline (−40 ±1 dBm, §2 of ADR 0005).
    `baro healthy` for the bench; the wire cannot carry them today (a counters tag is
    backlog, gated on the collision-proof process).
 
+### BENCH RUN 2026-08-25 — A1.6 DONE (bench range only); system restored to FLIGHT build
+
+**Cutover executed and verified**: merge `478451d` pushed, sled flashed, Pi pulled +
+ingest restarted — both ends BW500, `Vel`/`Gmx`/`Gmn` live and decoding, CI's first
+run green. **A1.6 sustained-10 Hz soak (bench build `7d5119b`, 17.4 min): numbers
+recorded in ADR 0005 A1.6 — cite that, don't restate.** Sled restored to the FLIGHT
+build afterwards and verified: 1 Hz pad TX, no bench banner, 20.00 Hz sampling,
+all counters zero, Pi receiving.
+
+**NEW OBSERVATION — flash-reset wedge, REPRODUCIBLE (2x), power-cycle recovers.**
+Both post-flash warm resets today parked the board dark: USB enumerates, no serial
+output, no TX; a single reset press did NOT clear it; battery+USB pull did, twice.
+The failure line was never captured (two instrument gaps: a dead-fd serial capture,
+then timing). HYPOTHESIS, not diagnosis: at 20 Hz sampling the flash reset lands
+mid-I2C-transaction far more often than the old 1 Hz build, BMP390 holds SDA low,
+`begin_I2C()` fails, app parks in its init `while(1)` — which would explain why
+months of flashing never showed this before today. Not flight-risk (a pad battery
+connect IS a power cycle); dev workaround: power-cycle after every flash.
+**Candidate fix, queued: I2C bus-clear (9 SCL pulses) before `Wire.begin()`.**
+
+**Also observed, hypothesis only: detaching a USB serial monitor stalls the sled
+~1 s** (two zero-loss 1 s TX pauses, plausibly correlated with monitor detach;
+`tx skips 0` says the loop never saw itself miss). Watch on any monitor-free soak;
+promote if it appears there.
+
+### QUEUED NEXT (after this branch's merge gate): `feat/firmware-9dof`
+
+LSM6DSOX/LIS3MDL driver in `src/` + the E+F frame split (ADR 0005 A1.3): raw 9-DoF
+on 1 Hz PAD frames — the Epic 5 ground-cal dataset (5.a: the pad frame IS the
+calibration record) — and `Wmx` on 10 Hz FLIGHT frames; wired through
+`sensors::Health`'s reserved IMU6/MAG slots. Decoder rows, A1.4 forms, collision
+proof and buffer sizing all already landed — the sled read path is the only
+missing piece.
+
 ### FRANK-VERIFY BEFORE BENCH
 
 - **SX1276 errata §2.1 register values** (`b4b0187`: 0x36=0x02, 0x3A=0x7F at 434 MHz

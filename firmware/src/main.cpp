@@ -133,6 +133,10 @@ void setup() {
 
   if (!adxl.begin()) { Serial.println("ADXL375 not found"); while (1); }
   Serial.println("Sled TX ready (ADR v1)");
+#ifdef BENCH_FORCE_FAST_TX
+  // Evidence must describe the artifact: this build says what it is, every boot.
+  Serial.println("*** BENCH BUILD: TX interval FORCED FAST (10 Hz on the pad) — NOT FLIGHT FIRMWARE ***");
+#endif
 }
 
 // SAMPLE FAST, TRANSMIT SLOW (6.0a).

@@ -3,7 +3,8 @@
 **Status:** ACCEPTED — §8's gate was measured and passed 2026-08-06 (see §8). **Read
 that as clearing the DECISION, not the build: the measurement was taken at 1 Hz
 arrival / BW125 / 109 B frames** (§8's own caveat) — the artifact that flies is
-covered only by A1.6's sustained-10 Hz bench, which is still pending.
+covered by A1.6's sustained-10 Hz bench — **measured 2026-08-25, results in A1.6**
+(bench range only; field-range margin stays flight-gated).
 **Date:** 2026-08-06
 **Supersedes:** nothing. **Amends:** the RF configuration implied by ADR 0002's receiver.
 
@@ -348,10 +349,34 @@ Binary encoding is NOT taken now, for three reasons with evidence attached:
 duty pressure at 10 Hz. When a fourth arrives, that is the trigger** to open the binary
 v2 epic — not before.
 
-## A1.6 Both-ends constants and measured numbers — *pending bench*
+## A1.6 Both-ends constants and measured numbers — MEASURED 2026-08-25 (bench range only)
 
-Completed at build close-out: the sled-side and Pi-side bandwidth constants cited
-side-by-side by file:line (§7's silent-total-link-loss hazard), and the measured achieved
-sample rate, RX-turn distribution at real 10 Hz arrival (closing §8's 1 Hz-arrival
-caveat), skipped-TX count, and battery draw at the new duty — replacing every estimate
-above that a bench can measure.
+**Both-ends constants:** no longer cited side-by-side by hand — welded mechanically.
+The sled's `firmware/lib/rfconfig/rf_config.h` and the Pi's `ground/rx/sx127x.py
+LoRaConfig` are compared value-by-value AND by resulting register semantics in
+`ground/rx/tests/test_rf_both_ends.py`, with the sled's register derivation pinned by
+`firmware/test/test_rfconfig` — either end drifting alone fails a test (§7's
+silent-total-link-loss hazard, made a test failure).
+
+**Sustained-10 Hz soak** — 17.4 min, bench build `7d5119b` (flight build + forced fast
+interval; only the schedule's input differs), antennas on, bench geometry, 10,318 packets:
+
+| measured | value |
+|---|---|
+| achieved sample rate | **20.00 Hz** (0 baro failures, baro healthy throughout) |
+| sustained arrival rate | **9.91 pkt/s** |
+| inter-arrival | p50 **103 ms**, p95 104, p99 **107**, max 217 |
+| loss | **9 packets, 0.087 %** — every event a single packet (dt ≈ 203 ms), the RX FIFO-overwrite class; early events ~31.5 s periodic (unattributed ingest rhythm) |
+| skipped-TX / forced-TX / encode overflows | **0 / 0 / 0** over the whole soak |
+| RSSI | −53.3 dBm, σ 0.79 |
+
+Two additional ~1 s arrival stalls carried ZERO loss (SEQ contiguous — sled-side TX
+pauses, plausibly correlated with USB serial-monitor detach; hypothesis, watched).
+
+**§8's 1 Hz-arrival caveat is closed by ARRIVAL evidence, not a per-turn instrument:**
+sustained 10 Hz decode at 0.087 % overwrite loss bounds the RX turn in practice; a
+per-turn timing distribution was not separately instrumented.
+
+**STILL OPEN:** battery draw at the new duty (bench ran USB-powered — no number), and
+field-range margin (flight-gated, §2). A 20 s flight at the measured overwrite rate
+expects ~0.2 lost packets.

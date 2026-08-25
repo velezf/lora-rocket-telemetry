@@ -11,6 +11,7 @@ ONE WRITER PER FORMAT: the index serialization is flights_to_json — the same
 bytes `rebuild` writes — pinned by test so publish can never become a second
 index writer with its own drift-prone format.
 """
+import json
 import sys
 
 from ground.flights.derive import derive_flights
@@ -36,7 +37,28 @@ def publish_flight(session_records, ops_records, flight_id, site_dir, silence_s=
             sys.exit(f"no flight {flight_id} in the derived index "
                      f"({[f.flight_id for f in flights]})")
 
-    (site_dir / "flights.json").write_text(flights_to_json(flights))
+    # THE SITE INDEX IS THE ARCHIVE — it accumulates across sessions (first
+    # multi-session publish, 2026-08-25: a plain overwrite would have erased
+    # July's F1 from the public page). Union semantics: this derivation's
+    # flights upsert by flight_id; entries from other sessions are preserved;
+    # order by t_start. A fresh dir degenerates to exactly flights_to_json
+    # (pinned byte-identical to rebuild's output). A corrupt existing index is
+    # LOUD — never silently clobber the archive.
+    index_path = site_dir / "flights.json"
+    derived = json.loads(flights_to_json(flights))
+    if index_path.exists():
+        try:
+            existing = json.loads(index_path.read_text())
+        except ValueError:
+            sys.exit(f"existing {index_path} is not valid JSON — refusing to "
+                     "overwrite the archive; inspect it first")
+        ours = {f["flight_id"] for f in derived}
+        merged = [f for f in existing if f["flight_id"] not in ours] + derived
+        merged.sort(key=lambda f: f["t_start"])
+        index_path.write_text(json.dumps(merged))
+    else:
+        index_path.write_text(flights_to_json(flights))
+
     rows = flight_rows(session_records, flight)
     (site_dir / f"{flight.flight_id}.csv").write_text(rows_to_csv(rows))
     return flights

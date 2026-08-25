@@ -87,6 +87,54 @@ class TestPublishCore(unittest.TestCase):
                              index_path.read_text())
 
 
+class TestPublishAccumulatesTheArchive(unittest.TestCase):
+    """The site's flights.json is the ARCHIVE — it accumulates across sessions
+    (found at first multi-session publish, 2026-08-25: overwriting with one
+    session's derivation would have erased July's F1 from the public page).
+    Publish UNIONS: this session's flights upsert by flight_id; existing
+    entries from other sessions are preserved; order is by t_start."""
+
+    def test_existing_flights_from_other_sessions_survive(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            # A flight from an EARLIER session/date than anything in _records()
+            # (the derived flights are 2026-07-08-*, so this must not collide).
+            old = [{"flight_id": "2026-06-01-F1", "date": "2026-06-01", "src": 1,
+                    "t_start": "2026-06-01T18:21:57.444Z", "t_end": "2026-06-01T18:23:25.000Z",
+                    "peak_alt_ft": -74, "label": "Maiden"}]
+            (site / "flights.json").write_text(json.dumps(old))
+            publish_flight(_records(), [], flight_id=None, site_dir=site, silence_s=90)
+            index = json.loads((site / "flights.json").read_text())
+            ids = [f["flight_id"] for f in index]
+            self.assertIn("2026-06-01-F1", ids)               # the old flight survives
+            self.assertEqual(len(index), 3)                   # 1 old + 2 new
+            self.assertEqual(ids, sorted(ids))                # t_start(=id date) order
+
+    def test_republishing_same_session_upserts_not_duplicates(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            publish_flight(_records(), [], flight_id=None, site_dir=site, silence_s=90)
+            publish_flight(_records(), [], flight_id=None, site_dir=site, silence_s=90)
+            index = json.loads((site / "flights.json").read_text())
+            self.assertEqual(len(index), 2)                   # no duplicate rows
+
+    def test_rederivation_of_this_session_overwrites_its_own_entries(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            flights = publish_flight(_records(), [], flight_id=None, site_dir=site,
+                                     silence_s=90)
+            fid = flights[0].flight_id
+            # simulate a stale earlier publish of the SAME flight with old stats
+            index = json.loads((site / "flights.json").read_text())
+            for f in index:
+                if f["flight_id"] == fid: f["packets_lost"] = 999999
+            (site / "flights.json").write_text(json.dumps(index))
+            publish_flight(_records(), [], flight_id=None, site_dir=site, silence_s=90)
+            index = json.loads((site / "flights.json").read_text())
+            row = next(f for f in index if f["flight_id"] == fid)
+            self.assertNotEqual(row.get("packets_lost"), 999999)   # fresh derivation wins
+
+
 class TestPublishCli(unittest.TestCase):
     def test_local_publish_end_to_end(self):
         with tempfile.TemporaryDirectory() as d:

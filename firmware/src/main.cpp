@@ -104,6 +104,44 @@ float readBatteryVoltage() {
   return raw * 3.3f / 1023.0f * 2.0f;
 }
 
+// ---- I2C bus-clear (fix for the reproducible flash-reset wedge) ----
+// A reset landing mid-I2C-transaction can leave a slave driving SDA low, and no
+// CPU reset clears that — only clocking the slave's shift register out does.
+// Standard remedy: up to 9 SCL pulses until SDA releases, then a STOP. Runs
+// BEFORE any Wire init, and REPORTS — deliberately an INSTRUMENT as well as a
+// fix: RESUME's wedge mechanism is a hypothesis, and "SDA STUCK LOW" printed on
+// a post-flash boot is that hypothesis caught in the act (or, never printing
+// across many flashes, evidence against it).
+static void i2cBusClear() {
+  pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
+  pinMode(PIN_WIRE_SCL, INPUT_PULLUP);
+  delayMicroseconds(10);
+  if (digitalRead(PIN_WIRE_SDA) == HIGH) {
+    Serial.println("I2C bus: clean at boot");
+    return;
+  }
+  int pulses = 0;
+  for (; pulses < 9 && digitalRead(PIN_WIRE_SDA) == LOW; pulses++) {
+    pinMode(PIN_WIRE_SCL, OUTPUT);
+    digitalWrite(PIN_WIRE_SCL, LOW);       // open-drain style: drive low...
+    delayMicroseconds(5);
+    pinMode(PIN_WIRE_SCL, INPUT_PULLUP);   // ...release high via pull-up
+    delayMicroseconds(5);
+  }
+  const bool released = (digitalRead(PIN_WIRE_SDA) == HIGH);
+  if (released) {
+    pinMode(PIN_WIRE_SDA, OUTPUT);         // generate a STOP: SDA low->high
+    digitalWrite(PIN_WIRE_SDA, LOW);       // while SCL is high
+    delayMicroseconds(5);
+    pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
+    delayMicroseconds(5);
+  }
+  Serial.print("I2C bus: SDA STUCK LOW at boot, ");
+  Serial.print(released ? "released after " : "STILL STUCK after ");
+  Serial.print(pulses);
+  Serial.println(" SCL pulses");
+}
+
 void setup() {
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
@@ -128,6 +166,8 @@ void setup() {
   // from the shared constant, not assumed from power-on state.
   rf95.spiWrite(RH_RF95_REG_39_SYNC_WORD, rf::SYNC_WORD);
   rf95.setTxPower(rf::TX_POWER_DBM, false);
+
+  i2cBusClear();   // BEFORE any Wire user — see the function's why-and-instrument note
 
   if (!bmp.begin_I2C()) { Serial.println("BMP390 not found"); while (1); }
   // 1x oversampling, NOT temp-off: BMP3 pressure compensation REQUIRES the temperature

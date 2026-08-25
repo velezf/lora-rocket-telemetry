@@ -72,7 +72,11 @@ mid-I2C-transaction far more often than the old 1 Hz build, BMP390 holds SDA low
 `begin_I2C()` fails, app parks in its init `while(1)` — which would explain why
 months of flashing never showed this before today. Not flight-risk (a pad battery
 connect IS a power cycle); dev workaround: power-cycle after every flash.
-**Candidate fix, queued: I2C bus-clear (9 SCL pulses) before `Wire.begin()`.**
+**Candidate fix: I2C bus-clear (9 SCL pulses) before `Wire.begin()` — BUILT on
+`feat/i2c-hardening` (2026-08-25), deliberately as an INSTRUMENT too:** it prints
+"clean" or "SDA STUCK LOW, released after N pulses" on every boot, so the next
+post-flash boot either catches the hypothesized mechanism in the act or, over many
+flashes of silence, argues against it. Bench-pending.
 
 **Also observed, hypothesis only: detaching a USB serial monitor stalls the sled
 ~1 s** (two zero-loss 1 s TX pauses, plausibly correlated with monitor detach;

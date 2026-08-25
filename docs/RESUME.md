@@ -79,14 +79,29 @@ connect IS a power cycle); dev workaround: power-cycle after every flash.
 `tx skips 0` says the loop never saw itself miss). Watch on any monitor-free soak;
 promote if it appears there.
 
-### QUEUED NEXT (after this branch's merge gate): `feat/firmware-9dof`
+### NAMED OPEN HAZARD — silent 9-DoF death in flight (red team 2026-08-25, finding 2)
 
-LSM6DSOX/LIS3MDL driver in `src/` + the E+F frame split (ADR 0005 A1.3): raw 9-DoF
-on 1 Hz PAD frames — the Epic 5 ground-cal dataset (5.a: the pad frame IS the
-calibration record) — and `Wmx` on 10 Hz FLIGHT frames; wired through
-`sensors::Health`'s reserved IMU6/MAG slots. Decoder rows, A1.4 forms, collision
-proof and buffer sizing all already landed — the sled read path is the only
-missing piece.
+The vendored LSM6DS/LIS3MDL drivers return unconditional `true` and DISCARD the
+underlying I2C status; on a read failure the parse buffer is UNINITIALIZED, so a
+sensor dying in flight freezes — or fabricates — `Wmx`/`Gy?`/`Mg?` with no counter,
+no health note, and no wire evidence. **Epic 5 must treat a constant spin trace as
+suspect, not as data.** Fix path (queued WITH the I2C work, after the bench): raw
+reads carrying real I2C status → `sensors::Health` enrollment → in-loop degrade
+flags. Recorded here so the gap is a named hazard, not a code comment.
+
+### `feat/firmware-9dof` — BUILT, RED-TEAMED, BENCH-VERIFIED 2026-08-25
+
+The queued 9-DoF branch is done and live on the bench: E+F frame split (shape
+derived from St — no field to disagree), LSM6DSOX/LIS3MDL read path, byte-goldens
+taken mechanically from the ground fixtures, DEGRADE-not-park for enrichment
+sensors (Frank's disposition on red-team finding 1), magnitude range truth
+(A1.4 corrected: Wmx worst 3973.0 dps, Gmx/Gmn 346.4 g — formatting coincidence
+now pinned). Bench: pad frames carry the full tail at 1 Hz, mag vector ≈ 40 µT
+(real Earth field), gyro ≤1 dps stationary and responding to a hand rotation
+(±110 dps observed) with `launch reverts 0`; **RATE 20.00 Hz achieved ON THIS
+ARTIFACT** — the extra ~2.5 ms of I2C per tick cost nothing measurable, closing
+the red team's evidence caveat. `sensors::Health` IMU6/MAG stay deliberately
+unenrolled (see the named hazard above). Awaiting merge gate.
 
 ### FRANK-VERIFY BEFORE BENCH
 

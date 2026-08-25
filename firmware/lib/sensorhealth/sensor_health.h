@@ -18,13 +18,17 @@
 // a sensor never seen is UNHEALTHY, not vacuously fine — a health check that starts
 // true before any evidence is a check that cannot fail.
 //
-// WHO IS COVERED. BARO (BMP390: performReading() returns a real bool), IMU6 (LSM6DSOX)
-// and MAG (LIS3MDL) when item 7 lands — their drivers report read success. The ADXL375
-// is DELIBERATELY ABSENT: Adafruit_ADXL375::getEvent() returns true unconditionally
-// (verified in the vendored source), so there is no failure signal to count, and the
-// obvious heuristic — zero magnitude means dead sensor — is FLIGHT-UNSAFE: a coasting
-// rocket is ballistic and legitimately reads ~0 g. Sentinel colliding with a legal
-// value. Recorded here so nobody "fixes" the gap with that heuristic.
+// WHO IS COVERED. BARO only (BMP390: performReading() returns a real bool). The
+// ADXL375, LSM6DSOX and LIS3MDL are ALL DELIBERATELY ABSENT — every one of their
+// getEvent() paths returns true unconditionally over a void _read() (verified in the
+// vendored sources: ADXL 2026-08, LSM6DS 4.7.4 + LIS3MDL 1.2.5 at 9-DoF integration
+// 2026-08-25 — correcting this comment's earlier claim that those drivers report
+// read success; they do not). Wiring health to an unconditional-true return would be
+// a check that cannot fail. The obvious heuristic — zero magnitude means dead
+// sensor — is FLIGHT-UNSAFE: a coasting rocket is ballistic and legitimately reads
+// ~0 g (sentinel colliding with a legal value). IMU6/MAG enrollment waits for a
+// raw-read path that carries real I2C status. Recorded here so nobody "fixes" the
+// gap with the zero-magnitude heuristic.
 
 namespace sensors {
 

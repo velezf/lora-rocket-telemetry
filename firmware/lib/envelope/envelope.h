@@ -42,8 +42,11 @@ public:
     float gmx() const { return empty_ ? (seen_any_ ? last_ : 0.0f) : gmx_; }
     float gmn() const { return empty_ ? (seen_any_ ? last_ : 0.0f) : gmn_; }
 
-    // Start a fresh window. Call ONLY after the values were consumed by a frame that
-    // actually went to air (see reset discipline above).
+    // Start a fresh window. Call ONLY when a frame actually went to air (see reset
+    // discipline above) — whether or not that frame's SHAPE carried this window's
+    // tag: a pad frame resets the gyro window it did not transmit, discarding
+    // stationary-pad samples a max cannot be raised by. What must never happen is a
+    // reset on a frame that did NOT fly (SKIP / encode drop).
     void reset() { empty_ = true; }
 
 private:

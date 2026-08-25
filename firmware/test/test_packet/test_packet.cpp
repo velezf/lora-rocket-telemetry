@@ -12,9 +12,11 @@ void tearDown(void) {}
 static const char *GOLDEN =
     "V:1 SYS:7 SRC:1 SEQ:42 St:1 ALT:1234ft Max:5678ft "
     "G:2.3 Pg:9.1 T:21.5C Batt:3.92V MET:12";
+// St:1 -> FLIGHT shape: base + Wmx (E+F split, ADR 0005 A1.3). The shape is DERIVED
+// from St inside the encoder — there is no shape field to disagree with the state.
 static const char *GOLDEN_EXT =
     "V:1 SYS:7 SRC:1 SEQ:42 St:1 ALT:1234ft Max:5678ft "
-    "G:2.3 Pg:9.1 T:21.5C Batt:3.92V MET:12 Vel:88.2 Gmx:9.1 Gmn:0.9";
+    "G:2.3 Pg:9.1 T:21.5C Batt:3.92V MET:12 Vel:88.2 Gmx:9.1 Gmn:0.9 Wmx:47.2";
 
 // The golden input corresponding to GOLDEN above.
 static Packet golden_input(void) {
@@ -33,6 +35,11 @@ static Packet golden_input(void) {
     p.vel_fps = 88.2f;
     p.gmx = 9.1f;
     p.gmn = 0.9f;
+    p.wmx = 47.2f;
+    p.gyx = 1.1f; p.gyy = -0.4f; p.gyz = 0.2f;     // ignored: St:1 is flight shape
+    p.mgx = 23.0f; p.mgy = -41.5f; p.mgz = 7.8f;   // ignored: St:1 is flight shape
+    p.has_imu6 = true;
+    p.has_mag  = true;
     return p;
 }
 
@@ -73,10 +80,18 @@ void test_encodes_second_fixture(void) {
     p.vel_fps = -32.75f; // -> -32.8 (may be negative: descent)
     p.gmx = 199.94f;     // -> 199.9
     p.gmn = 0.05f;       // -> 0.1
+    p.wmx = 999.9f;      // ignored: St:0 is PAD shape — no Wmx on pad frames
+    p.gyx = 1.14f; p.gyy = -0.45f; p.gyz = 0.0f;   // -> 1.1 -0.4 0.0
+    p.mgx = 23.04f; p.mgy = -41.54f; p.mgz = 478.9f;   // -> 23.0 -41.5 478.9
+    p.has_imu6 = true;
+    p.has_mag  = true;
 
+    // St:0 -> PAD shape: base + raw 9-DoF channels, no Wmx (A1.3 — the pad frame
+    // is Epic 5's calibration record).
     const char *expected =
         "V:1 SYS:255 SRC:2 SEQ:65535 St:0 ALT:-123ft Max:20000ft "
-        "G:0.9 Pg:12.4 T:-5.0C Batt:3.71V MET:0 Vel:-32.8 Gmx:199.9 Gmn:0.1";
+        "G:0.9 Pg:12.4 T:-5.0C Batt:3.71V MET:0 Vel:-32.8 Gmx:199.9 Gmn:0.1 "
+        "Gyx:1.1 Gyy:-0.4 Gyz:0.0 Mgx:23.0 Mgy:-41.5 Mgz:478.9";
 
     char buf[192];
     size_t n = encode_packet(p, buf, sizeof(buf));
@@ -101,23 +116,159 @@ void test_version_is_constant_one(void) {
 
 static Packet saturated_packet() {
     Packet p;
-    p.sys = 255; p.src = 255; p.seq = 65535; p.state = 3;
+    p.sys = 255; p.src = 255; p.seq = 65535; p.state = 2;
     p.alt_ft = -19999; p.max_ft = 199999;
-    p.g = -199.9f; p.pg = 199.9f; p.temp_c = -99.9f; p.batt_v = 99.99f;
+    p.g = 199.9f; p.pg = 199.9f; p.temp_c = -99.9f; p.batt_v = 99.99f;
     p.met_s = 65535;
     p.vel_fps = -1999.9f;   // A1.4 worst form
     p.gmx = 199.9f;
     p.gmn = 199.9f;         // worst FORM is the longest, not the value floor (A1.4)
+    p.wmx = 2293.8f;        // LSM6DSOX ±2000 dps FS reports to ±2293.8 per axis
+    p.gyx = p.gyy = p.gyz = -2293.8f;
+    p.mgx = p.mgy = p.mgz = -478.9f;
+    p.has_imu6 = true;
+    p.has_mag  = true;
     return p;
 }
 
-// ADR 0005 §4 / A1.4: the worst-case frame with Vel/Gmx/Gmn is 141 B (109 + 12 + 10
-// + 10). If a field's range assumption grows, this number, the A1.4 table and the
-// msg[] size in src/main.cpp move together — this test is what makes that drift loud.
-void test_worst_case_frame_is_141_bytes_per_adr0005(void) {
+// --- CROSS-LANGUAGE GOLDENS: the ground decoder's worst-frame fixtures
+// (ground/flights/tests/fixtures/newtags_worst_frames.jsonl, merged 8bad30c) carry
+// the exact raw strings both ends must agree on. The C encoder reproduces them
+// byte-for-byte — the same frames the Python decoder is already pinned against. ---
+
+void test_flight_shape_matches_ground_fixture_byte_for_byte(void) {
+    Packet p = saturated_packet();          // St:2 -> flight shape
+    const char *fixture =
+        "V:1 SYS:255 SRC:255 SEQ:65535 St:2 ALT:-19999ft Max:199999ft "
+        "G:199.9 Pg:199.9 T:-99.9C Batt:99.99V MET:65535 "
+        "Vel:-1999.9 Gmx:199.9 Gmn:199.9 Wmx:2293.8";
+    char buf[512];
+    size_t n = encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING(fixture, buf);
+    TEST_ASSERT_EQUAL_UINT(strlen(fixture), n);
+}
+
+void test_pad_shape_matches_ground_fixture_byte_for_byte(void) {
+    Packet p = saturated_packet();
+    p.state = 0;                            // St:0 -> pad shape
+    const char *fixture =
+        "V:1 SYS:255 SRC:255 SEQ:65535 St:0 ALT:-19999ft Max:199999ft "
+        "G:199.9 Pg:199.9 T:-99.9C Batt:99.99V MET:65535 "
+        "Vel:-1999.9 Gmx:199.9 Gmn:199.9 "
+        "Gyx:-2293.8 Gyy:-2293.8 Gyz:-2293.8 Mgx:-478.9 Mgy:-478.9 Mgz:-478.9";
+    char buf[512];
+    size_t n = encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING(fixture, buf);
+    TEST_ASSERT_EQUAL_UINT(strlen(fixture), n);
+}
+
+// A1.4 worst-case sizes: FLIGHT 152 B, PAD 210 B (supersedes the pre-9DoF 141 B pin).
+// The worst FORM of G is the NEGATIVE bound (-199.9 — one byte longer than the
+// fixture's 199.9, which is why the fixture strings measure 151/209). If a range
+// assumption grows, the A1.4 table, these pins and the msg[] size in src/main.cpp
+// move together — these tests make that drift loud.
+void test_worst_case_sizes_per_adr0005_a14(void) {
+    Packet p = saturated_packet();
+    p.g = -199.9f;                          // worst form, not worst value
+    char buf[512];
+    TEST_ASSERT_EQUAL_UINT(152, encode_packet(p, buf, sizeof(buf)));   // flight
+    p.state = 0;
+    TEST_ASSERT_EQUAL_UINT(210, encode_packet(p, buf, sizeof(buf)));   // pad
+}
+
+// --- DEGRADE, NOT PARK (red-team finding 1, disposition 2026-08-25): a dead
+// enrichment sensor drops ITS tags — missing tags are v1-legal (ADR 0001) — and
+// the frame still flies. The encoder owns the omission via has_imu6/has_mag. ---
+
+void test_missing_imu6_drops_gyro_tags_in_both_shapes(void) {
+    Packet p = saturated_packet();
+    p.has_imu6 = false;
+    char buf[512];
+    p.state = 2;                            // flight: no Wmx, base intact
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NULL(strstr(buf, " Wmx:"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Vel:"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Gmn:"));
+    p.state = 0;                            // pad: no gyro channels, mag survives
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NULL(strstr(buf, " Gyx:"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Mgx:"));
+}
+
+void test_missing_mag_drops_mag_tags_on_pad(void) {
+    Packet p = saturated_packet();
+    p.has_mag = false;
+    p.state = 0;
+    char buf[512];
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Gyx:"));   // gyro unaffected
+    TEST_ASSERT_NULL(strstr(buf, " Mgx:"));
+    p.state = 1;                            // flight never carried mag anyway
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Wmx:"));
+}
+
+void test_both_enrichment_missing_pad_frame_is_base_only(void) {
+    Packet p = saturated_packet();
+    p.has_imu6 = false;
+    p.has_mag  = false;
+    p.state = 0;
+    const char *base_only =
+        "V:1 SYS:255 SRC:255 SEQ:65535 St:0 ALT:-19999ft Max:199999ft "
+        "G:199.9 Pg:199.9 T:-99.9C Batt:99.99V MET:65535 "
+        "Vel:-1999.9 Gmx:199.9 Gmn:199.9";
+    char buf[512];
+    size_t n = encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING(base_only, buf);
+    TEST_ASSERT_EQUAL_UINT(strlen(base_only), n);
+}
+
+// --- RANGE TRUTH (red-team finding 3): the transmitted quantities are vector
+// MAGNITUDES, whose true worst values exceed the per-axis full scale — Wmx up to
+// sqrt(3)*2293.8 = 3973.0 dps, Gmx/Gmn up to sqrt(3)*200 ≈ 346.4 g. Their worst
+// FORMS happen to be the same length as the per-axis forms; this test pins that,
+// so the coincidence the size pins rest on can no longer drift silently. ---
+
+void test_true_magnitude_worst_forms_hold_the_size_pins(void) {
+    Packet p = saturated_packet();
+    p.g = -199.9f;                          // per-axis worst FORM for G (longest)
+    p.wmx = 3973.0f;                        // magnitude worst, not per-axis worst
+    p.gmx = 346.4f;
+    p.gmn = 346.4f;
+    char buf[512];
+    p.state = 2;
+    TEST_ASSERT_EQUAL_UINT(152, encode_packet(p, buf, sizeof(buf)));
+    p.state = 0;
+    TEST_ASSERT_EQUAL_UINT(210, encode_packet(p, buf, sizeof(buf)));
+}
+
+// Out-of-enum St (no St:3 exists today): the encoder must treat ANY nonzero state
+// as flight shape — pinned so a future state cannot silently become a pad frame.
+void test_out_of_enum_state_takes_flight_shape(void) {
+    Packet p = saturated_packet();
+    p.state = 3;
+    char buf[512];
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Wmx:"));
+    TEST_ASSERT_NULL(strstr(buf, " Gyx:"));
+}
+
+// The shape follows St and ONLY St: flight frames carry Wmx and no raw channels;
+// pad frames carry raw channels and no Wmx. Both assertions in both directions,
+// so a tail emitted unconditionally cannot pass.
+void test_shape_follows_state(void) {
     Packet p = saturated_packet();
     char buf[512];
-    TEST_ASSERT_EQUAL_UINT(141, encode_packet(p, buf, sizeof(buf)));
+    p.state = 1;
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Wmx:"));
+    TEST_ASSERT_NULL(strstr(buf, " Gyx:"));
+    TEST_ASSERT_NULL(strstr(buf, " Mgx:"));
+    p.state = 0;
+    encode_packet(p, buf, sizeof(buf));
+    TEST_ASSERT_NULL(strstr(buf, " Wmx:"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Gyx:"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, " Mgx:"));
 }
 
 void test_exact_fit_succeeds(void) {
@@ -155,7 +306,15 @@ int main(int, char **) {
     RUN_TEST(test_encodes_golden_vector);
     RUN_TEST(test_adr_golden_is_an_exact_prefix);
     RUN_TEST(test_encodes_second_fixture);
-    RUN_TEST(test_worst_case_frame_is_141_bytes_per_adr0005);
+    RUN_TEST(test_flight_shape_matches_ground_fixture_byte_for_byte);
+    RUN_TEST(test_pad_shape_matches_ground_fixture_byte_for_byte);
+    RUN_TEST(test_worst_case_sizes_per_adr0005_a14);
+    RUN_TEST(test_shape_follows_state);
+    RUN_TEST(test_missing_imu6_drops_gyro_tags_in_both_shapes);
+    RUN_TEST(test_missing_mag_drops_mag_tags_on_pad);
+    RUN_TEST(test_both_enrichment_missing_pad_frame_is_base_only);
+    RUN_TEST(test_true_magnitude_worst_forms_hold_the_size_pins);
+    RUN_TEST(test_out_of_enum_state_takes_flight_shape);
     RUN_TEST(test_version_is_constant_one);
     RUN_TEST(test_exact_fit_succeeds);
     RUN_TEST(test_one_byte_short_is_LOUD_not_a_fragment);

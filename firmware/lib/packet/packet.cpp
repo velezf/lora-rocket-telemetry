@@ -26,19 +26,33 @@ size_t encode_packet(const Packet& p, char* out, size_t out_len) {
         static_cast<double>(p.gmx),
         static_cast<double>(p.gmn));
 
-    if (n < 0) {
+    // TRUNCATION IS LOUD (both stages). The old contract returned out_len-1 — a
+    // valid-looking length — and the fragment went to air, where it DECODED: a frame
+    // cut at 105 B yielded a valid packet with MET:6 against a true 65535, no counter
+    // moved (measured 2026-08-07, docs/newtag-collision-proof.md §5 context). No real
+    // frame is 0 bytes, so 0 is the unambiguous failure return, and the buffer is
+    // emptied so a caller that ignores the return value transmits nothing, not a lie.
+    if (n < 0 || static_cast<size_t>(n) >= out_len) {
         out[0] = '\0';
         return 0;
     }
-    // TRUNCATION IS LOUD. The old contract returned out_len-1 here — a valid-looking
-    // length — and the fragment went to air, where it DECODED: a frame cut at 105 B
-    // yielded a valid packet with MET:6 against a true 65535, no counter moved
-    // (measured 2026-08-07, docs/newtag-collision-proof.md §5 context). No real frame
-    // is 0 bytes, so 0 is the unambiguous failure return, and the buffer is emptied so
-    // a caller that ignores the return value transmits nothing rather than a lie.
-    if (static_cast<size_t>(n) >= out_len) {
+
+    // E+F tail, derived from St (A1.3): pad frames carry the raw 9-DoF channels —
+    // the stationary calibration record — and flight frames carry the Wmx envelope
+    // (instantaneous gyro at 10 Hz would alias; the window max survives any TX rate).
+    int t;
+    if (p.state == 0) {
+        t = snprintf(out + n, out_len - n,
+                     " Gyx:%.1f Gyy:%.1f Gyz:%.1f Mgx:%.1f Mgy:%.1f Mgz:%.1f",
+                     static_cast<double>(p.gyx), static_cast<double>(p.gyy),
+                     static_cast<double>(p.gyz), static_cast<double>(p.mgx),
+                     static_cast<double>(p.mgy), static_cast<double>(p.mgz));
+    } else {
+        t = snprintf(out + n, out_len - n, " Wmx:%.1f", static_cast<double>(p.wmx));
+    }
+    if (t < 0 || static_cast<size_t>(t) >= out_len - n) {
         out[0] = '\0';
         return 0;
     }
-    return static_cast<size_t>(n);
+    return static_cast<size_t>(n + t);
 }

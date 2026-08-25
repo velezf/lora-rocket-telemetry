@@ -27,6 +27,13 @@ struct Packet {
     float          vel_fps; // Vel  onboard vertical velocity, ft/s (1 decimal, ±1999.9)
     float          gmx;     // Gmx  TX-window max |accel|, g (1 decimal, 0–199.9)
     float          gmn;     // Gmn  TX-window min |accel|, g (1 decimal)
+    // E+F frame split (ADR 0005 A1.3/A1.4). THE SHAPE IS DERIVED FROM `state`:
+    // St:0 emits the PAD tail (raw 9-DoF — Epic 5's calibration record), anything
+    // else emits the FLIGHT tail (Wmx). There is no shape field, so shape and
+    // flight state cannot disagree — by construction, not by discipline.
+    float          wmx;     // Wmx  TX-window max |gyro|, dps (flight frames; ±2293.8 FS)
+    float          gyx, gyy, gyz;  // Gy?  raw gyro, dps (pad frames)
+    float          mgx, mgy, mgz;  // Mg?  raw mag, µT (pad frames; ±478.9 FS)
 };
 
 // Encode `p` into `out` (capacity `out_len`) as an ADR-0001 v1 packet string.

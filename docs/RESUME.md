@@ -76,7 +76,17 @@ connect IS a power cycle); dev workaround: power-cycle after every flash.
 `feat/i2c-hardening` (2026-08-25), deliberately as an INSTRUMENT too:** it prints
 "clean" or "SDA STUCK LOW, released after N pulses" on every boot, so the next
 post-flash boot either catches the hypothesized mechanism in the act or, over many
-flashes of silence, argues against it. Bench-pending.
+flashes of silence, argues against it.
+
+**BENCH 2026-08-25 (`e8f2f4a` flashed): the FIRST post-flash boot since the 20 Hz
+firmware that needed NO power cycle** — board came up unaided, verdict `i2c boot
+clean` (three-state after red team F2: clean / SDA-stuck-released / SCL-stuck,
+persisted on every RATE line per F4, so a missed boot print no longer loses the
+evidence). ONE data point — the bus happened not to be stuck this boot; the
+question closes as the verdicts accumulate across future flashes. Mag re-proven
+on the changed 0xA8 transaction (F3): three distinct axes, |B| ≈ 40.8 µT,
+matching pre-swap. `imu6/mag fails+healthy` live on the RATE line. The
+power-cycle ritual stays the fallback until the verdict history says otherwise.
 
 **Also observed, hypothesis only: detaching a USB serial monitor stalls the sled
 ~1 s** (two zero-loss 1 s TX pauses, plausibly correlated with monitor detach;

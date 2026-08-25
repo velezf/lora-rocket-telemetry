@@ -10,7 +10,14 @@ import json
 from ground.flights.segmenter import is_telemetry
 
 # ADR-0001 field tags carried as one column each, plus the log/flight context.
-_FIELD_TAGS = ["SYS", "SRC", "SEQ", "St", "ALT", "Max", "G", "Pg", "T", "Batt", "MET"]
+# Extended 2026-08-25 with the 10 Hz build's additive tags (ADR 0005 A1.3/A1.4,
+# wire order): without them F2's archive CSV would have silently dropped the very
+# data the 10 Hz build exists to produce. Pre-10 Hz flights re-export with these
+# columns EMPTY — additive and deterministic; a re-derived F1 differs from its
+# published CSV only by empty superset columns.
+_FIELD_TAGS = ["SYS", "SRC", "SEQ", "St", "ALT", "Max", "G", "Pg", "T", "Batt", "MET",
+               "Vel", "Gmx", "Gmn", "Wmx",
+               "Gyx", "Gyy", "Gyz", "Mgx", "Mgy", "Mgz"]
 COLUMNS = ["flight_id", "received_at", "rssi"] + _FIELD_TAGS
 
 

@@ -39,8 +39,17 @@ def derive_flights(session_records, ops=None, silence_timeout_s: float = 90):
         if o.get("op") == "close":
             close_times.setdefault(o["src"], []).append(_epoch(o["at"]))
 
-    # merged, time-sorted event stream; at equal t: open(0) < packet(1) < close(2)
+    # merged, time-sorted event stream; at equal t: open(0) < packet(1) < close(2).
+    # PACKET ORDER IS THE FILE'S APPEND ORDER, clamped monotonic (2026-08-25,
+    # first 10 Hz field data): the session file's append order IS the physical
+    # arrival order, but `received_at` wall stamps can invert by tens of ms.
+    # A raw time-sort re-ordered such packets, and each backwards SEQ pair
+    # became ~65,535 "lost" in the gap stat (F1 reported 720,906 lost from 11
+    # inversions). Clamping each packet's sort key to running-max time makes
+    # inverted stamps EQUAL keys, and Python's stable sort then preserves file
+    # order — while ops events still interleave at their own timestamps.
     events = []
+    t_mono = float("-inf")
     for r in session_records:
         # EVERY accepted packet reaches the segmenter, including non-telemetry
         # frames (bare `CALL` beacons, which carry no `St`). This filter used to
@@ -48,7 +57,8 @@ def derive_flights(session_records, ops=None, silence_timeout_s: float = 90):
         # live path — the beacon segregation now lives in ONE place,
         # segmenter.is_telemetry, so the two cannot disagree.
         if r.get("type") == "packet" and "fields" in r:
-            events.append((_epoch(r["received_at"]), 1, "packet", r))
+            t_mono = max(t_mono, _epoch(r["received_at"]))
+            events.append((t_mono, 1, "packet", r))
     for o in ops:
         if o.get("op") == "open":
             events.append((_epoch(o["at"]), 0, "open", o))

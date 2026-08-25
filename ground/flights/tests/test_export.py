@@ -76,6 +76,50 @@ class TestExport(unittest.TestCase):
         rows = flight_rows([err], self.flight)
         self.assertEqual(rows, [])
 
+    # --- The 10 Hz build's tags reach the archive (red-team #1 of the F2 publish
+    # review, 2026-08-25): the export column list silently dropped every additive
+    # tag, so F2's CSV would have carried none of the data the 10 Hz build exists
+    # to produce. Columns follow the wire order (ADR 0005 A1.4). ---
+
+    def test_new_tags_export_as_columns(self):
+        rec = pkt("2026-07-08T00:00:01Z", 1, 2, 500)
+        rec["fields"].update({"Vel": -12.3, "Gmx": 2.8, "Gmn": 0.5, "Wmx": 227.9})
+        rows = flight_rows([rec], self.flight)
+        self.assertEqual(rows[0]["Vel"], -12.3)
+        self.assertEqual(rows[0]["Gmx"], 2.8)
+        self.assertEqual(rows[0]["Gmn"], 0.5)
+        self.assertEqual(rows[0]["Wmx"], 227.9)
+
+    def test_pad_frame_raw_channels_export_as_columns(self):
+        rec = pkt("2026-07-08T00:00:01Z", 1, 2, 500)
+        rec["fields"]["St"] = 0
+        rec["fields"].update({"Vel": 0.1, "Gmx": 1.0, "Gmn": 0.9,
+                              "Gyx": 0.4, "Gyy": 0.5, "Gyz": -0.1,
+                              "Mgx": -16.0, "Mgy": 24.4, "Mgz": 28.6})
+        rows = flight_rows([rec], self.flight)
+        self.assertEqual(rows[0]["Gyx"], 0.4)
+        self.assertEqual(rows[0]["Mgz"], 28.6)
+        self.assertIsNone(rows[0]["Wmx"])      # pad frames carry no Wmx: empty, not fake
+
+    def test_old_records_get_empty_new_columns_not_errors(self):
+        """Re-deriving F1 (pre-10 Hz records) stays valid: the new columns exist
+        and are empty. Additive, deterministic — a re-export differs from the
+        published F1 CSV only by empty superset columns."""
+        rows = flight_rows(self.records, self.flight)      # fixtures have no new tags
+        for r in rows:
+            for tag in ("Vel", "Gmx", "Gmn", "Wmx", "Gyx", "Gyy", "Gyz",
+                        "Mgx", "Mgy", "Mgz"):
+                self.assertIn(tag, r)
+                self.assertIsNone(r[tag])
+
+    def test_column_order_is_base_then_wire_order(self):
+        self.assertEqual(
+            COLUMNS,
+            ["flight_id", "received_at", "rssi",
+             "SYS", "SRC", "SEQ", "St", "ALT", "Max", "G", "Pg", "T", "Batt", "MET",
+             "Vel", "Gmx", "Gmn", "Wmx",
+             "Gyx", "Gyy", "Gyz", "Mgx", "Mgy", "Mgz"])
+
 
 if __name__ == "__main__":
     unittest.main()

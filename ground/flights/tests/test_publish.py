@@ -71,20 +71,46 @@ class TestPublishCore(unittest.TestCase):
                 publish_flight(_records(), [], flight_id="nope",
                                site_dir=Path(d), silence_s=90)
 
-    def test_index_matches_rebuild_byte_for_byte(self):
-        """Publish must not become a second index writer with its own format:
-        flights.json from publish is IDENTICAL to what `rebuild` writes —
-        one derivation, one serialization (the one-writer discipline)."""
+    def test_published_entries_carry_the_page_schema(self):
+        """THE PAGE IS THE CONTRACT (found 2026-08-25, first real publish):
+        projects/lora-flights.qmd reads a FLAT, ENRICHED entry — top-level
+        stats plus derived date / peak_agl_ft / loss_pct / csv. The F1-era
+        one-off publish produced that shape by hand; publish now owns it.
+        The derivation stays deterministic from rebuild's Flights — one
+        derivation, one (flattened) serialization."""
         with tempfile.TemporaryDirectory() as d:
-            site = Path(d) / "site"; site.mkdir()
-            session = Path(d) / "s.jsonl"
-            session.write_text("\n".join(json.dumps(r) for r in _records()))
-            index_path = Path(d) / "f.json"
-            main(["rebuild", str(session), "--ops", str(Path(d) / "ops.jsonl"),
-                  "-o", str(index_path), "--silence", "90"])
+            site = Path(d)
             publish_flight(_records(), [], flight_id=None, site_dir=site, silence_s=90)
-            self.assertEqual((site / "flights.json").read_text(),
-                             index_path.read_text())
+            index = json.loads((site / "flights.json").read_text())
+            e = index[0]
+            # every key the page reads, at top level (qmd python + OJS blocks)
+            for k in ("flight_id", "date", "src", "t_start", "t_end",
+                      "peak_agl_ft", "peak_alt_ft", "baseline_ft", "baseline_n",
+                      "duration_s", "packets_rx", "packets_lost", "loss_pct",
+                      "rssi_min", "rssi_max", "label", "motor", "field", "csv"):
+                self.assertIn(k, e, f"page reads {k} at top level")
+            self.assertNotIn("stats", e)                     # flattened, not nested
+            self.assertEqual(e["date"], e["t_start"][:10])
+            if e["baseline_ft"] is not None:
+                self.assertEqual(e["peak_agl_ft"],
+                                 e["peak_alt_ft"] - e["baseline_ft"])
+            else:
+                # this fixture has no locked pad baseline: AGL honestly absent,
+                # never fabricated from a missing zero
+                self.assertIsNone(e["peak_agl_ft"])
+            self.assertEqual(e["csv"], f"lora-flights/{e['flight_id']}.csv")
+            rx, lost = e["packets_rx"], e["packets_lost"]
+            self.assertEqual(e["loss_pct"], round(lost / (rx + lost) * 100, 2))
+
+    def test_annotations_ride_the_published_entry(self):
+        ops = [{"op": "annotate", "src": 1, "at": "2026-07-08T00:00:01.000Z",
+                "label": "Maiden", "motor": "F15-6", "field": "Izaak Walton Field"}]
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            publish_flight(_records(), ops, flight_id=None, site_dir=site, silence_s=90)
+            e = json.loads((site / "flights.json").read_text())[0]
+            self.assertEqual((e["label"], e["motor"], e["field"]),
+                             ("Maiden", "F15-6", "Izaak Walton Field"))
 
 
 class TestPublishAccumulatesTheArchive(unittest.TestCase):

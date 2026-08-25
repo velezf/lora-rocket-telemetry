@@ -44,10 +44,21 @@ constexpr unsigned long FAST_WINDOW_MS = 300000;  // 300 s from MET zero (see ab
 // would disagree. uint32_t makes host behaviour equal target behaviour.
 inline unsigned long interval_ms(bool in_flight, unsigned long now_ms,
                                  unsigned long launch_ms) {
+#ifdef BENCH_FORCE_FAST_TX
+    // BENCH BUILD ONLY (env:feather_m0_tx_bench): the A1.6 sustained-10 Hz bench
+    // cannot honestly run on the flight build — fast TX engages only in confirmed
+    // flight, which a bench cannot induce without changing what is measured. This
+    // forces the fast interval unconditionally; RF path, loop and ground pipeline
+    // are the flight build's, only the schedule's INPUT differs. The boot banner
+    // in main.cpp marks the artifact; test_txsched_bench pins these semantics.
+    (void)in_flight; (void)now_ms; (void)launch_ms;
+    return FLIGHT_TX_MS;
+#else
     if (!in_flight) return PAD_TX_MS;
     const unsigned long met_ms =
         (unsigned long)((now_ms - launch_ms) & 0xFFFFFFFFUL);
     return (met_ms < FAST_WINDOW_MS) ? FLIGHT_TX_MS : PAD_TX_MS;
+#endif
 }
 
 }  // namespace txsched

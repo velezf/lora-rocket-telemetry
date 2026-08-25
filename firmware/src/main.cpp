@@ -141,9 +141,11 @@ void setup() {
 // detectors saw one sample per second, which is why the 2026-07-08 shake test's 2.2 g jerk
 // fell between samples and never tripped launch detection.
 //
-// THE WIRE IS UNCHANGED. TX stays at exactly 1 Hz and the packet format is untouched, so the
-// ground station needs no change, ADR 0001 needs no bump, and the e2e golden fixture stays
-// valid. Only the DETECTORS and the onboard running Max see the faster rate.
+// THE WIRE HAS NOW CHANGED TOO (ADR 0005) — this note superseded the 6.0a-era "wire is
+// unchanged" claim, which stopped being true on this branch: TX is St-dependent
+// (lib/txsched), and the frame carries three additive tags (Vel/Gmx/Gmn). All of it
+// within ADR 0001 v1 (additive tags, no bump); the ground decodes the new tags (merged
+// with the newtag collision proof) and the e2e fixtures cover both frame shapes.
 //
 // Measured on the synthetic profile (firmware/lib/profile, 6.0b): confirmed-apogee latency
 // costs 77.9 ft of altitude at 1 Hz versus 33.8 ft at 20 Hz. Most of that is won by 5 Hz
@@ -252,11 +254,12 @@ void loop() {
       p.gmx     = gEnv.gmx();
       p.gmn     = gEnv.gmn();
 
-      // 256 B: sized to the LARGEST frame of the E+F split (ADR 0005 A1.4) — the 210 B
-      // worst-case PAD frame (12 tags + Vel/Gmx/Gmn + raw 9-DoF), not the 152 B flight
-      // frame — under the 251 B RH_RF95_MAX_MESSAGE_LEN send cap. Range assumptions
-      // behind those worst cases live in the A1.4 table; if a field's range grows, the
-      // table and this size move together or encode_packet starts returning 0 below.
+      // 256 B: TODAY's worst case is 141 B (12 tags + Vel/Gmx/Gmn — pinned by
+      // test_worst_case_frame_is_141_bytes_per_adr0005). Wmx and the raw 9-DoF pad
+      // tags are NOT yet emitted (no LSM6DSOX driver in src/), so A1.4's 210 B pad
+      // frame is what this buffer is sized AHEAD for, under the 251 B
+      // RH_RF95_MAX_MESSAGE_LEN send cap. If a range assumption grows, the A1.4
+      // table and the pinned length move together or encode_packet returns 0 below.
       char msg[256];
       size_t n = encode_packet(p, msg, sizeof(msg));
       if (n == 0) {
@@ -281,6 +284,10 @@ void loop() {
     else if (now - sampleWindowStart >= 5000UL) {
       Serial.print("RATE: "); Serial.print(sampleCount * 1000.0f / (now - sampleWindowStart));
       Serial.print(" Hz achieved, baro failures "); Serial.print(sensorHealth.failures(sensors::BARO));
+      // The time-based health verdict, CONSUMED (red-team finding 9: healthy() had no
+      // caller — designed-but-inert). 0 here on the bench means the baro has not
+      // answered within stale_ms even if the failure count looks small.
+      Serial.print(", baro healthy "); Serial.print(sensorHealth.healthy(sensors::BARO, now) ? 1 : 0);
       // Reverts are transients the detector rejected. A non-zero count on the pad is the sled
       // telling you it was knocked -- and that it correctly declined to call it a launch.
       Serial.print(", launch reverts "); Serial.print(launchDet.reverts());

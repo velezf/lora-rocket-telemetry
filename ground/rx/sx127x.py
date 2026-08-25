@@ -32,6 +32,8 @@ R_RSSI = 0x1B
 R_MODEM1 = 0x1D
 R_MODEM2 = 0x1E
 R_MODEM3 = 0x26
+R_HBW_OPT1 = 0x36  # SX1276 errata §2.1: high-BW sensitivity optimization
+R_HBW_OPT2 = 0x3A
 R_PREMSB = 0x20
 R_PRELSB = 0x21
 R_SYNC = 0x39
@@ -155,6 +157,17 @@ class SX127xRx:
         self._write(R_PRELSB, c.preamble & 0xFF)
         self._write(R_SYNC, c.sync_word)
         self._write(R_LNA, 0x20)               # max LNA gain
+        # SX1276 errata note §2.1 ("Sensitivity Optimization with a 500 kHz
+        # Bandwidth"): without these writes, RX sensitivity at BW500 sits below
+        # the datasheet figure ADR 0005's link budget assumes (red-team finding
+        # 8; register values to be verified against the published errata sheet
+        # before the bench). For any other bandwidth 0x36 returns to automatic
+        # and 0x3A is chip-managed.
+        if c.bandwidth_khz == 500:
+            self._write(R_HBW_OPT1, 0x02)
+            self._write(R_HBW_OPT2, 0x7F if c.freq_hz <= 525_000_000 else 0x64)
+        else:
+            self._write(R_HBW_OPT1, 0x03)
         self._write(R_FIFORXBASE, 0x00)
         self._write(R_FIFOADDR, 0x00)
         self._write(R_OPMODE, LORA | STDBY)

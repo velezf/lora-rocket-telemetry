@@ -1,6 +1,9 @@
 # ADR 0005 — Telemetry rate and RF configuration: 10 Hz at SF7/BW500
 
-**Status:** ACCEPTED — §8's gate was measured and passed 2026-08-06 (see §8)
+**Status:** ACCEPTED — §8's gate was measured and passed 2026-08-06 (see §8). **Read
+that as clearing the DECISION, not the build: the measurement was taken at 1 Hz
+arrival / BW125 / 109 B frames** (§8's own caveat) — the artifact that flies is
+covered only by A1.6's sustained-10 Hz bench, which is still pending.
 **Date:** 2026-08-06
 **Supersedes:** nothing. **Amends:** the RF configuration implied by ADR 0002's receiver.
 
@@ -67,7 +70,19 @@ RX   = 17 dBm − 88.71 dB = −71.7 dBm   (0 dBi assumed both ends)
 MARGIN vs −117 dBm sensitivity = 45.3 dB
 ```
 
-> **CAVEAT — THIS MARGIN IS A DESIGN ASSUMPTION, NOT A MEASUREMENT.** It assumes 0 dBi at
+> **CAVEAT RETIRED 2026-08-08 — repair CLEARED by Frank on the numbers below.** The
+> receive path was re-validated end to end after the u.FL re-solder + bulkhead pigtail:
+> close range (few ft, usual bench geometry) **−40 ±1 dBm, zero loss, σ = 0.38 over
+> 45/45 packets** — 40 dB of the 42–66 dB antenna deficit recovered, **2 dB shy of the
+> −38..−14 gate's weak edge**, attributed to the new chain's insertion loss (u.FL +
+> pigtail + bulkhead) plus the antenna change. **Named, not hidden:** the mechanical
+> wiggle test (joint under flex) was OFFERED AND WAIVED — a σ=0.38 feed is not a broken
+> joint's signature, but joint robustness under field vibration rests on judgement, not
+> measurement. The formal u.FL continuity meter check was likewise overtaken by the
+> working link and never run. Field-RANGE margin (vs the ~42 dB design number below)
+> remains unmeasured until a flight.
+>
+> *(Original caveat, kept for the record:)* **THIS MARGIN IS A DESIGN ASSUMPTION, NOT A MEASUREMENT.** It assumes 0 dBi at
 > both ends and an intact RF path. At the time of writing the ground station's u.FL
 > connector has been **re-soldered** and its bulkhead pigtail is **damaged, replacement on
 > order** — so the receive path is unvalidated end to end. The number becomes evidence only

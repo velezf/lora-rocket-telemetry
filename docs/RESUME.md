@@ -17,6 +17,57 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
+## HANDOFF — 2026-08-25: BUILD ORDER COMPLETE, RED TEAM DONE — NEXT IS BENCH
+
+**`feat/firmware-10hz` (local, never pushed) carries the whole ADR 0005 build order
+(steps 2–7; step 1 was already on `main`) AND all nine red-team findings, fixed.**
+88/88 native, 14/14 cross-end guard, 16/16 sx127x, target compiles. The red team ran
+2026-08-24 (Fable 5 agent, briefed per the taxonomy section below — cited, not
+restated); every finding was verified against the repo before relaying, then fixed,
+one commit per finding cluster — **the per-finding detail lives in the commit
+messages, cite them**: `310d9fe` (F6 stale-baro apogee feed), `e7ea59d` (F1+F8
+mechanical register weld), `5ca4cf4` (F5 velocity noise test), `f80378b` (F7 stale
+prose + F9 health consumer), `b4b0187` (F8 SX1276 errata regs), plus the CI workflow
+and this docs commit.
+
+### CUTOVER — the merge/deploy/flash ORDERING is the change (finding 2)
+
+**`main` is cross-end inconsistent TODAY**: its ground default has been BW500 since
+`d53b9a6` while its sled firmware is BW125 — the two ends of `main` cannot hear each
+other. Consequences, so nobody burns hours on a "wedged radio" that is actually the
+cutover: **a dark bench while the two boxes are on opposite sides of the cutover is
+EXPECTED.** Before diagnosing any dark link, establish which side each box is on
+(`git log` on the Pi; the sled is whatever was last flashed). Order after this branch
+merges: flash the sled, redeploy/restart ingest on the Pi from the same `main`, run
+the cross-end guard (`ground/rx/tests/test_rf_both_ends.py`) and confirm close-range
+RSSI against the post-pigtail baseline (−40 ±1 dBm, §2 of ADR 0005).
+
+### BENCH PROTOCOL — two additions that are now load-bearing (findings 3, 4)
+
+1. **§8's RX-turn measurement does not cover this build** (1 Hz arrival, BW125, 109 B,
+   pre-newtags decoder — the ADR status line now says so). The sustained-10 Hz bench
+   with **FIFO-overwrite counts** (A1.6) is the evidence that replaces it, not a
+   formality on top of it.
+2. **Watch INTER-ARRIVAL TIMES on the ground, not loss alone.** TX SKIPs deliberately
+   do not gap SEQ, so a repeatedly-wedging radio degrades 10 Hz → ~2 Hz while the loss
+   statistic reads 0 %. The sled's serial RATE line carries `tx skips` / `tx forced` /
+   `baro healthy` for the bench; the wire cannot carry them today (a counters tag is
+   backlog, gated on the collision-proof process).
+
+### FRANK-VERIFY BEFORE BENCH
+
+- **SX1276 errata §2.1 register values** (`b4b0187`: 0x36=0x02, 0x3A=0x7F at 434 MHz
+  BW500) were written from recollection, twice-agreed (agent + main thread) but from
+  the SAME kind of source — check the published errata sheet; the close-range RSSI
+  comparison corroborates.
+- **`FAST_WINDOW_MS` = 300 s** (`lib/txsched/txsched.h`) is CHOSEN, NOT MEASURED —
+  rationale beside the constant (~2× worst realistic flight; asymmetric risk).
+- **CI** (`.github/workflows/checks.yml`) is UNVERIFIED until the first push runs it.
+- **Rule 10 recurred three times in this session** (cwd drift between parallel tool
+  calls, caught each time by a failed command rather than a wrong one). The
+  committed-but-unwired `verify-cwd` hook now has its "if it recurs" evidence —
+  wiring it is a settings change awaiting Frank's decision.
+
 ## HANDOFF — 2026-08-07, start of the 10 Hz build session
 
 **NOTHING FLEW ON 2026-08-06.** The section below is titled "FLIGHT DAY" and describes a
@@ -72,7 +123,27 @@ The 10 Hz sustained bench runs **antenna-less at arm's length** (the link decode
 measured **−80/−81 dBm**). Report **loss** and **FIFO-overwrite** counts. This validates the
 sled, the loop and the ground pipeline. **It does not validate the RF path.**
 
-### DEFERRED — all pigtail-gated, do not attempt
+### DEFERRED — pigtail items CLEARED 2026-08-08; what remains is flight-gated
+
+**The pigtail arrived, was wired to the project-box bulkhead antenna, and the repair was
+CLEARED by Frank**: close range −40 ±1 dBm / zero loss / σ 0.38 (vs −80/−81 antenna-less;
+gate −38..−14 — 2 dB shy of the weak edge, attributed to chain insertion loss). Wiggle
+test and formal continuity check waived on judgement — named in ADR 0005 §2. **Still
+open, now FLIGHT-gated, not pigtail-gated:** field-range margin, and the flight itself
+(red team + bench first).
+
+**WEDGED-RADIO HARDENING — admission-rule candidate with evidence (2026-08-08).** During
+the antenna work the SX127x latched into a state that decoded NOTHING for 3.7 h while
+ingest ran healthy — heartbeat green, loop turning, `G_RX` dark (the panel told the
+truth; believe the LEDs). A polling driver cannot distinguish a wedged radio from a
+silent sky: IRQ flags simply never set. Recovery was a service restart (full re-init).
+Passes the admission rule: (a) at the field, wedging between pad power-cycle and launch
+is a LOST FLIGHT; (b) tonight is the concrete evidence. Candidate fix: re-init the radio
+after N minutes of RX silence — harmless when the sky is genuinely quiet. Also a
+red-team hunting ground: the RX path has a latch with no bounded exit, the same class
+just removed from the sled's detectors.
+
+### Superseded 2026-08-08 (original pigtail-gated list)
 
 - **Field-range link margin.** ADR 0005 §2's ~42 dB is a *design assumption*, unvalidated.
 - **u.FL continuity check** — centre pin NOT shorted to shield, before the new pigtail is

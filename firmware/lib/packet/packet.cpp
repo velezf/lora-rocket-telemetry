@@ -13,23 +13,32 @@ size_t encode_packet(const Packet& p, char* out, size_t out_len) {
     int n = snprintf(
         out, out_len,
         "V:1 SYS:%u SRC:%u SEQ:%u St:%u ALT:%dft Max:%dft "
-        "G:%.1f Pg:%.1f T:%.1fC Batt:%.2fV MET:%u",
+        "G:%.1f Pg:%.1f T:%.1fC Batt:%.2fV MET:%u "
+        "Vel:%.1f Gmx:%.1f Gmn:%.1f",
         p.sys, p.src, p.seq, p.state,
         p.alt_ft, p.max_ft,
         static_cast<double>(p.g),
         static_cast<double>(p.pg),
         static_cast<double>(p.temp_c),
         static_cast<double>(p.batt_v),
-        p.met_s);
+        p.met_s,
+        static_cast<double>(p.vel_fps),
+        static_cast<double>(p.gmx),
+        static_cast<double>(p.gmn));
 
     if (n < 0) {
         out[0] = '\0';
         return 0;
     }
-    // On truncation snprintf returns the would-be length; report bytes actually
-    // written (never counting the NUL, never past the buffer).
+    // TRUNCATION IS LOUD. The old contract returned out_len-1 here — a valid-looking
+    // length — and the fragment went to air, where it DECODED: a frame cut at 105 B
+    // yielded a valid packet with MET:6 against a true 65535, no counter moved
+    // (measured 2026-08-07, docs/newtag-collision-proof.md §5 context). No real frame
+    // is 0 bytes, so 0 is the unambiguous failure return, and the buffer is emptied so
+    // a caller that ignores the return value transmits nothing rather than a lie.
     if (static_cast<size_t>(n) >= out_len) {
-        return out_len - 1;
+        out[0] = '\0';
+        return 0;
     }
     return static_cast<size_t>(n);
 }

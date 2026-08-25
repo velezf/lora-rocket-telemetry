@@ -186,3 +186,33 @@ class TestReceive(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHighBwSensitivityErrata(unittest.TestCase):
+    """SX1276 errata note §2.1 ("Sensitivity Optimization with a 500 kHz
+    Bandwidth"): at BW500 the receiver needs 0x36=0x02 and 0x3A=0x7F (410-525
+    MHz band; 0x64 for 862-1020 MHz), else sensitivity is degraded below the
+    datasheet figure the ADR 0005 link budget assumes. For every other
+    bandwidth 0x36 returns to 0x03 (automatic) and 0x3A is left to the chip.
+    Register values are from the errata sheet — flagged for verification
+    against the published document before the bench (red-team finding 8)."""
+
+    def _configured(self, cfg):
+        spi = FakeSpi()
+        SX127xRx(spi, cfg, sleep=lambda *_: None).configure()
+        return spi
+
+    def test_bw500_in_the_434mhz_band_writes_lf_errata_values(self):
+        spi = self._configured(LoRaConfig())          # deployed default: BW500 @ 434 MHz
+        self.assertEqual(spi.wrote(0x36), 0x02)
+        self.assertEqual(spi.wrote(0x3A), 0x7F)
+
+    def test_bw500_in_the_hf_band_writes_hf_errata_value(self):
+        spi = self._configured(LoRaConfig(freq_hz=915_000_000))
+        self.assertEqual(spi.wrote(0x36), 0x02)
+        self.assertEqual(spi.wrote(0x3A), 0x64)
+
+    def test_other_bandwidths_restore_automatic_mode(self):
+        spi = self._configured(LoRaConfig(bandwidth_khz=125))
+        self.assertEqual(spi.wrote(0x36), 0x03)       # automatic per errata
+        self.assertIsNone(spi.wrote(0x3A))            # auto mode: chip manages 0x3A

@@ -110,6 +110,17 @@ pending).** The 9-DoF data path now reads registers through `Adafruit_I2CDevice`
 the health verdicts and failure counts ride the serial RATE line. The Epic 5
 caution about constant spin traces in EXISTING records still stands.
 
+### F2 FLIGHT-DAY CHECKLIST — updated 2026-08-25, cite it, don't restate it
+
+**[`docs/field-checklist.md`](field-checklist.md) is the canonical launch-day procedure and
+now carries an "F2 DELTAS" section (§7b)** — the 10 Hz build's field-visible changes: 5-min
+fast window then 1 Hz landed beacon (so the flight stays OPEN until the sled powers off at
+recovery), frame shapes switching with St, the on-rail power-cycle doubling as the I2C
+wedge recovery, the ground-radio wedge's manual restart, the RSSI-vs-distance recording ask
+(F2 IS the field-range measurement), and the loss-statistic caveat. The baseline-window
+wording there was also corrected to TIME-based (its old text restated the superseded
+sample count). Save the page offline before leaving, per its own header.
+
 ### `feat/firmware-9dof` — BUILT, RED-TEAMED, BENCH-VERIFIED 2026-08-25
 
 The queued 9-DoF branch is done and live on the bench: E+F frame split (shape

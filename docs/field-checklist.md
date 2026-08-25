@@ -67,7 +67,10 @@ Phone-readable. Cold hands. No laptop. **Save this page offline before leaving.*
 5. **Sled: antenna first, then battery.** Hold it **still and level for ~5 s** — the baro zero is calibrated at boot.
 6. Within seconds the box shows **G_RX fast-blinking** and the OLED starts showing altitude.
 7. Place on the pad. **Leave it transmitting, undisturbed, for ≥30 s before launch** — the AGL zero locks
-   from the last **15 pad packets** (final 2 excluded). Handling it during that window corrupts the zero.
+   from the last **15 seconds** of quiet pad data (trailing ~2 s excluded; TIME-based at any rate —
+   authority `ground/flights/baseline.py`). Handling it during that window corrupts the zero.
+   **Bonus while it sits: pad frames carry the raw 9-DoF channels — every quiet pad minute is free
+   Epic 5 calibration data. Longer is better.**
 
 ---
 
@@ -247,9 +250,11 @@ If `G_FLIGHT` is dark after a clean boost, the boost packet was lost — recover
 
 ## 7. Post-flight — close out and recover the data
 
-- [ ] Flight **closes automatically after 90 s of telemetry silence**. `G_FLIGHT` goes dark; the OLED
-      switches to **SUMMARY** and **holds the peak** — that is the number to read walking downrange.
-- [ ] To close it exactly (or if the sled is still transmitting), use the CLI `close` below.
+- [ ] Flight **closes automatically after 90 s of telemetry silence** — and **since the 10 Hz build
+      the landed sled KEEPS BEACONING at 1 Hz** (`St:2`, battery-bounded), so that silence only
+      arrives after you power the sled off at recovery. **Expect `G_FLIGHT` to stay solid until
+      then; that is the new normal, not a stuck flight.** Order: recover → sled off → ~90 s → closed.
+- [ ] To close it exactly (or sooner), use the CLI `close` below.
 - [ ] **Do not yank power.** Shut down cleanly (PiSugar button / `sudo poweroff`); RED slow-pulses
       through shutdown — let it finish.
 - [ ] **Write it down at the field:** flight number, motor, field name, anything odd. Paper or phone note.
@@ -272,6 +277,30 @@ cd ~/lora-rocket-telemetry
       and live in exactly one place, on one SD card. It is the only irreplaceable artifact in the system.**
 
 ---
+
+## 7b. F2 DELTAS — the 10 Hz build (first flown F2; read once before launch day)
+
+Everything above still applies. What the 2026-08-25 builds changed at the field:
+
+- **In flight the sled transmits at 10 Hz** (pad stays 1 Hz), for **5 minutes from liftoff**,
+  then drops back to 1 Hz beaconing — that bound is why a landed sled can't drain itself at
+  58.9 % duty in the grass. `St:1` appears ~0.5–1 s after liftoff (confirm-or-revert; MET is
+  backdated, so T+ is not delayed). `St:2` latches at apogee and rides all the way down.
+- **Frame shapes switch with `St`:** pad frames carry raw `Gyx..Mgz` (calibration record),
+  flight frames carry `Wmx` (spin envelope). The dashboard/OLED need nothing from you.
+- **The on-rail power-cycle (see PAD SEQUENCE) now does double duty:** the sled clears a
+  stuck I2C bus at every boot and would report it — if the sled comes up dark after a power
+  cycle (no `G_RX` recovery), cycle it again; that is the known wedge and its known recovery.
+- **Dark `G_RX` while the sled is DEFINITELY transmitting has a third cause** besides wrong
+  ID and no link: the ground radio's own wedge (it once decoded nothing for 3.7 h while
+  ingest looked healthy). Recovery: `sudo systemctl restart apogee-ingest`. The automatic
+  re-init hardening is NOT built — this manual step is the mitigation.
+- **Write down RSSI vs distance while walking the sled out** (dashboard on the phone):
+  field-range margin has never been measured, and F2 IS the measurement. Close-range
+  baseline for reference: **−40 ±1 dBm** (post-pigtail bench geometry).
+- **A 0 % loss figure cannot see sled-side TX degradation** (scheduling skips don't gap
+  `SEQ` by design). If something feels wrong at 10 Hz, the tell is packet AGE/cadence on
+  the dashboard, not the loss number.
 
 ## 8. What would make me lose the flight record — by LIKELIHOOD
 
@@ -325,6 +354,6 @@ baseline window poisoned by handling.
 **If `G_FLIGHT` is LIT, the power-cycle did NOT clear it.** Either it did not fully power down,
 or handling re-latched it after boot. Cycle again. **Do not arm until position 4 is dark.**
 
-**The ≥30 s undisturbed matters twice:** the AGL zero locks from a 15-sample window with 2
-excluded, so handling during it poisons the zero and **every altitude for the flight is silently
-offset.**
+**The ≥30 s undisturbed matters twice:** the AGL zero locks from a 15-second window with the
+trailing ~2 s excluded (time-based — `ground/flights/baseline.py`), so handling during it poisons
+the zero and **every altitude for the flight is silently offset.**

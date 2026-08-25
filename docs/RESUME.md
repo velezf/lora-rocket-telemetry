@@ -17,6 +17,36 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
+## FLIGHT DAY 2026-08-25 — F2/F3 FLOWN, CAPTURED, PUBLISHED (same day)
+
+**Two Katana Jr flights (F15-6, Izaak Walton Field) — the first real 10 Hz flight
+records this system has produced, live on the flights page the same evening.**
+`2026-08-25-F1`: 859 ft AGL, 3,222 packets, **0.31 % loss**, Vel max 201 ft/s,
+Wmx max 1,177 dps, 10.4 g boost. `2026-08-25-F2`: 749 ft AGL, 366 packets,
+0.54 % loss, Wmx max 2,299 dps (gyro FS). **FIELD-RANGE MEASUREMENT, at last:
+worst in-flight RSSI −101 dBm vs −117 sensitivity ≈ 16 dB real margin at ~860 ft**
+— replacing ADR 0005 §2's design assumption with flight data. F2's post-landing
+2.4 min RF shadow at grass level is the predicted recovery-beacon physics, not
+flight loss.
+
+**THE FLIGHTS FOUND THREE BUGS, all fixed+merged same evening (cite the commits):**
+timestamp-inversion loss manufacture (`1ed4a50` — wall stamps invert ~33 ms on a
+~20 s cadence; derive now honors arrival order, segmenter gap stat is
+reorder-tolerant), publish overwrote the archive (`bd96989` — union/upsert), and
+publish emitted the wrong schema for the page (`e0127e4` — the page is the
+contract, flattening pinned). Plus a page fix: plots derive T+ from millisecond
+received_at, not the whole-second MET staircase (site repo `09882c5`).
+
+**POST-MORTEM, OPEN (evidence recorded, causes not chased):** (a) the box HARD
+power-cut at the range ~21:31Z at 95 % battery — no `service_stop` in the session
+tail; cause unknown (connector jostle during pack-up is the leading guess);
+(b) **wake-on-charge did not fire** on shore power at home — button boot worked;
+`auto_power_on` was validated 2026-07; regressed or drained-state behavior?
+(c) **received_at wall stamps invert ~33 ms at ~20 s cadence** — Pi clock
+discipline question; `Observation` already carries a `mono` field the session
+record does not; recording `mono` per packet is the durable fix candidate.
+Zero flight data was lost to any of these.
+
 ## HANDOFF — 2026-08-25: BUILD ORDER COMPLETE, RED TEAM DONE — NEXT IS BENCH
 
 **`feat/firmware-10hz` (local, never pushed) carries the whole ADR 0005 build order

@@ -126,6 +126,64 @@ void test_captures_burnout_peak_within_15_percent(void) {
     TEST_ASSERT_TRUE_MESSAGE(peak < 1.05f * v_bo, "peak exceeds physics");
 }
 
+// --- NOISE (red-team finding 5): noise rejection is the property Vel EXISTS for —
+// ADR 0005 §4's whole justification is "differentiated on the ground it would be
+// noise; onboard it is the real curve". Every test above drives noise-free signals,
+// which asserts tracking but never that claim. This one injects deterministic
+// baro-like jitter and bounds the output's usability directly. ---
+
+// Deterministic LCG so the "noise" is identical on every run and every platform —
+// a seeded reproducible sequence, not randomness.
+static float lcg_noise_ft(unsigned long& state, float amplitude_ft) {
+    state = state * 1664525UL + 1013904223UL;
+    const float u = ((state >> 16) & 0x7FFF) / 32767.0f;   // [0,1]
+    return (u - 0.5f) * 2.0f * amplitude_ft;               // [-amp, +amp]
+}
+
+void test_noise_rejection_is_real_not_assumed(void) {
+    profile::Params p;
+    profile::generate(p);
+    const float hz = 20.0f, dt = 1.0f / hz;
+    const float noise_amp_ft = 2.0f;    // BMP390 at 4x/IIR-3: ~1-2 ft sample jitter
+
+    velocity::Estimator v;
+    unsigned long seed = 0xC0FFEEUL;
+    float worst_smoothed = 0.0f, sum_sq = 0.0f;
+    int   n = 0;
+    float prev_noisy_alt = 0.0f;
+    float worst_raw = 0.0f;
+    bool  have_prev = false;
+
+    for (float t = 0.0f; t < p.apogee_s; t += dt) {
+        const float noisy_alt = profile::altitude_ft(p, t) + lcg_noise_ft(seed, noise_amp_ft);
+        v.update(noisy_alt, (unsigned long)(t * 1000.0f));
+
+        if (have_prev && t > p.burn_s + 0.5f) {             // judge the coast phase
+            const float truth = true_velocity_fps(p, t);
+            const float raw   = (noisy_alt - prev_noisy_alt) / dt;   // ground-side dh/dt
+            const float e_s   = std::fabs(v.vel_fps() - truth);
+            const float e_r   = std::fabs(raw - truth);
+            if (e_s > worst_smoothed) worst_smoothed = e_s;
+            if (e_r > worst_raw)      worst_raw = e_r;
+            sum_sq += e_s * e_s; n++;
+        }
+        prev_noisy_alt = noisy_alt;
+        have_prev = true;
+    }
+    const float rms = std::sqrt(sum_sq / n);
+
+    // ANTI-HOLLOW: the injected noise must actually hurt the raw derivative — if the
+    // injection silently broke (zeros), raw error would be small and this fails.
+    TEST_ASSERT_TRUE_MESSAGE(worst_raw > 30.0f, "noise injection is not injecting");
+    // The filter must beat raw differentiation by a wide margin — §4's claim, asserted.
+    TEST_ASSERT_TRUE_MESSAGE(worst_smoothed < 0.5f * worst_raw,
+                             "smoothing is not beating raw dh/dt");
+    // Usability bounds on the transmitted value (coast truth is 0..~515 ft/s):
+    TEST_ASSERT_TRUE_MESSAGE(rms < 15.0f, "Vel RMS error exceeds 15 ft/s under noise");
+    TEST_ASSERT_TRUE_MESSAGE(worst_smoothed < 40.0f,
+                             "Vel worst-case error exceeds 40 ft/s under noise");
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_no_estimate_before_two_samples);
@@ -136,5 +194,6 @@ int main(int, char **) {
     RUN_TEST(test_survives_a_sample_gap);
     RUN_TEST(test_tracks_coast_phase_within_tolerance);
     RUN_TEST(test_captures_burnout_peak_within_15_percent);
+    RUN_TEST(test_noise_rejection_is_real_not_assumed);
     return UNITY_END();
 }

@@ -79,6 +79,16 @@ connect IS a power cycle); dev workaround: power-cycle after every flash.
 `tx skips 0` says the loop never saw itself miss). Watch on any monitor-free soak;
 promote if it appears there.
 
+### NAMED OPEN HAZARD — silent 9-DoF death in flight (red team 2026-08-25, finding 2)
+
+The vendored LSM6DS/LIS3MDL drivers return unconditional `true` and DISCARD the
+underlying I2C status; on a read failure the parse buffer is UNINITIALIZED, so a
+sensor dying in flight freezes — or fabricates — `Wmx`/`Gy?`/`Mg?` with no counter,
+no health note, and no wire evidence. **Epic 5 must treat a constant spin trace as
+suspect, not as data.** Fix path (queued WITH the I2C work, after the bench): raw
+reads carrying real I2C status → `sensors::Health` enrollment → in-loop degrade
+flags. Recorded here so the gap is a named hazard, not a code comment.
+
 ### QUEUED NEXT (after this branch's merge gate): `feat/firmware-9dof`
 
 LSM6DSOX/LIS3MDL driver in `src/` + the E+F frame split (ADR 0005 A1.3): raw 9-DoF

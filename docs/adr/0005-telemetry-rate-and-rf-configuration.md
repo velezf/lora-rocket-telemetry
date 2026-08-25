@@ -318,9 +318,9 @@ Existing 12 tags: assumptions as §4. New fields:
 | tag | frames | worst form | unit | range assumption |
 |---|---|---|---|---|
 | `Vel` | both | `Vel:-1999.9` | ft/s | ±1999.9 (F15 burnout ≈ 875 → 2.3× margin) |
-| `Gmx` | both | `Gmx:199.9` | g | window max of \|accel\|, 0–199.9 |
-| `Gmn` | both | `Gmn:199.9` | g | window min of \|accel\|; longest form governs |
-| `Wmx` | flight | `Wmx:2293.8` | dps | window max of \|gyro\|; LSM6DSOX ±2000 dps FS reports to ±2293.8 (int16 × 70 mdps/LSB) |
+| `Gmx` | both | `Gmx:346.4` | g | window max of \|accel\| — a vector MAGNITUDE: worst is √3 × 200 ≈ 346.4, NOT the per-axis 199.9 (corrected 2026-08-25, red team; same formatted length, pinned by test) |
+| `Gmn` | both | `Gmn:346.4` | g | window min of \|accel\|; longest form governs, magnitude bound as `Gmx` |
+| `Wmx` | flight | `Wmx:3973.0` | dps | window max of \|gyro\| — magnitude: worst is √3 × 2293.8 ≈ 3973.0 at LSM6DSOX ±2000 dps FS (int16 × 70 mdps/LSB per axis; corrected 2026-08-25, same formatted length, pinned by test) |
 | `Gyx/Gyy/Gyz` | pad | `-2293.8` | dps | raw gyro, same FS |
 | `Mgx/Mgy/Mgz` | pad | `-478.9` | µT | raw mag; LIS3MDL ±4 gauss FS → ±478.9 µT (int16 / 6842 LSB/gauss × 100) |
 

@@ -230,3 +230,33 @@ def test_next_flight_returns_to_the_rules_screen():
     g.on_view(V(st=2, apogee_reveal=True, peak_ft=400))
     g.on_view(V(st=0, apogee_reveal=False, peak_ft=0))
     assert g.phase == "rules"
+
+
+def test_locked_in_on_the_pad_stays_armed_not_menu():
+    g = game(players=("Bacon", "Dragon"))
+    lock(g, 1.0)
+    lock(g, 2.0)
+    assert g.phase == "watching"
+    # THE BUG (family bench 2026-08-31): pad frames kept arriving and the
+    # st==0 reset yanked the game back to the rules menu before launch
+    g.on_view(V(st=0))
+    g.on_view(V(st=0))
+    assert g.phase == "watching"         # armed, awaiting launch
+    assert g.armed                       # display shows the acknowledgment
+    assert g.guesses == [300, 300]
+    # ...and the reset still works where it should: AFTER a flight
+    g.on_view(V(st=1))
+    assert not g.armed                   # airborne now
+    g.on_view(V(st=2, apogee_reveal=True, peak_ft=400))
+    g.on_view(V(st=0, apogee_reveal=False, peak_ft=0))
+    assert g.phase == "rules"
+
+
+def test_start_over_chord_resets_from_anywhere_keeping_the_rule():
+    g = game(rule="no-over")
+    g.press_up(mono=1.0)
+    lock(g, 2.0)                         # Bacon banked
+    g.reset()                            # #5+#6 held together
+    assert g.phase == "rules"
+    assert g.guesses == []
+    assert g.rule == "no-over"           # the picked rule stays preselected

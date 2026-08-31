@@ -91,16 +91,28 @@ def main() -> int:
 
     def button_loop():
         # dumb edge-poller: press = newly LOW (active-low); debounce is the
-        # game's job, so a held button fires once per edge, not per poll
+        # game's job, so a held button fires once per edge, not per poll.
+        # Holding #5+#6 TOGETHER is the start-over chord (game.reset) —
+        # while the chord is down, single-button edges are suppressed.
         was = {name: True for name in buttons}
         actions = {"up": game.press_up, "down": game.press_down,
                    "lock": game.press_lock}
+        chord = False
         while not stop.is_set():
-            for name, b in buttons.items():
-                now_high = b.value
-                if was[name] and not now_high:
-                    actions[name](time.monotonic())
-                was[name] = now_high
+            vals = {name: b.value for name, b in buttons.items()}
+            if not vals["up"] and not vals["down"]:
+                if not chord:
+                    game.reset()
+                    chord = True
+            elif vals["up"] and vals["down"]:
+                chord = False
+            if not chord:
+                for name, now_high in vals.items():
+                    if was[name] and not now_high:
+                        actions[name](time.monotonic())
+                    was[name] = now_high
+            else:
+                was = dict(vals)
             stop.wait(BUTTON_POLL_S)
 
     t = threading.Thread(target=render_loop, name="render", daemon=True)

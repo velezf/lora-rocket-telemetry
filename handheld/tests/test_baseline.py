@@ -80,3 +80,16 @@ def test_unstable_pad_keeps_raw_until_it_settles():
     for i in range(20):
         obs(m, mono=30.0 + i, st=0, alt=-85, seq=40 + i)
     assert m.snapshot(mono=49.5).alt_ft == 0
+
+
+def test_next_flight_st_back_to_pad_resets_flight_latches():
+    m = HandheldModel()
+    t = settle(m)
+    obs(m, mono=t + 1, st=1, alt=115, maxft=115, seq=90)
+    obs(m, mono=t + 2, st=2, alt=50, maxft=327, seq=91)
+    assert m.snapshot(mono=t + 2.1).apogee_reveal
+    # sled power-cycled on the pad: St:0 again = a NEW flight
+    obs(m, mono=t + 60, st=0, alt=-85, seq=1)
+    v = m.snapshot(mono=t + 60.1)
+    assert not v.apogee_reveal          # reveal belongs to the OLD flight
+    assert v.peak_ft <= max(v.alt_ft, 0)   # peak reset with it

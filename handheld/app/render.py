@@ -19,16 +19,24 @@ _HERO = ImageFont.load_default(size=17)
 _ST_LABEL = {0: "PAD", 1: "UP!", 2: "DOWN"}
 
 
-def render(view) -> Image.Image:
+def _game_dial_line(game) -> str | None:
+    """The entry-phase overlay text, or None when the game has none."""
+    if game is not None and game.phase == "entry":
+        return f"{game.entering_name}? {game.current_guess}ft"
+    return None
+
+
+def render(view, game=None) -> Image.Image:
     img = Image.new("1", (WIDTH, HEIGHT), 0)
     d = ImageDraw.Draw(img)
+    dial = _game_dial_line(game)
 
     if view.mode == "idle":
         # a quiet pad must LOOK alive (the 2026-07-30 ground OLED defect was
         # an idle screen indistinguishable from a dead one)
         d.text((0, 0), "APOGEE ZEPHYR", font=_SMALL, fill=1)
         d.text((0, 11), "listening for", font=_SMALL, fill=1)
-        d.text((0, 21), "the rocket...", font=_SMALL, fill=1)
+        d.text((0, 21), dial or "the rocket...", font=_SMALL, fill=1)
         if view.battery_pct is not None:
             d.text((96, 0), f"{view.battery_pct}%", font=_SMALL, fill=1)
         return img
@@ -42,9 +50,14 @@ def render(view) -> Image.Image:
         d.text((0, 0), "APOGEE", font=_SMALL, fill=1)
         d.text((0, 10), f"{view.peak_ft}ft", font=_HERO, fill=1)
         d.text((92, 0), f"{view.alt_ft}", font=_SMALL, fill=1)
+        if game is not None and game.winner is not None:
+            name, guess = game.winner
+            d.text((70, 8), f"{name}!", font=_SMALL, fill=1)
+            d.text((70, 20), f"wins {guess}", font=_SMALL, fill=1)
     else:
         d.text((0, 0), f"{view.alt_ft}ft", font=_HERO, fill=1)
-        d.text((0, 22), f"PK {view.peak_ft}", font=_SMALL, fill=1)
+        # during guess entry the dial takes the PK slot (PK is 0 on a pad)
+        d.text((0, 22), dial or f"PK {view.peak_ft}", font=_SMALL, fill=1)
 
     st = _ST_LABEL.get(view.st, "?")
     d.text((66, 22), st, font=_SMALL, fill=1)

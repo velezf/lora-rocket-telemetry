@@ -77,6 +77,15 @@ class HandheldModel:
             self._baseline_frozen = True
         if st == 2:
             self._apogee_revealed = True
+        # St back to 0 after flight = the sled power-cycled on the pad for the
+        # NEXT launch: the flight latches (reveal, peak, frozen zero) belong
+        # to the old flight and reset with it
+        if st == 0 and self._st is not None and self._st != 0:
+            self._apogee_revealed = False
+            self._liftoff_mono = None
+            self._peak_ft = None
+            self._baseline_frozen = False
+            self._pad_hist = []
 
         if st == 0 and alt is not None and not self._baseline_frozen:
             from ground.flights.baseline import pad_baseline, trim_history

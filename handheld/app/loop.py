@@ -43,13 +43,17 @@ def rx_step(radio, model, mono: float, rx_counters, counters) -> None:
                    mono=mono, counters=rx_counters)
 
 
-def render_tick(model, display, mono: float, counters) -> None:
-    """Snapshot -> render -> show, unconditionally (periodic redraw).
+def render_tick(model, display, mono: float, counters, game=None) -> None:
+    """Snapshot -> (game transitions) -> render -> show, unconditionally.
 
     Runs even with no new data — a quiet pad must not look dead — and
     the display's recovery preamble rides every frame (see oled.py).
+    The game watches the same snapshot the display shows (one truth).
     """
     try:
-        display.show(render(model.snapshot(mono)))
+        view = model.snapshot(mono)
+        if game is not None:
+            game.on_view(view)
+        display.show(render(view, game))
     except Exception:
         counters.render_errors += 1

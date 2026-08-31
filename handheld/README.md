@@ -8,11 +8,16 @@ It's a **receive-only** node on the project's shared
 [v1 packet contract](../README.md) — one more listener alongside the Pi 5 ground
 station, with no RX firmware (native `adafruit_rfm9x`, the Epic 2.5 pattern).
 
-> **Status: platform groundwork only.** The project is at Epic 1–2; Epic 8 is an
-> optional node. This folder currently holds the **provisioning runbook**, the
-> [platform ADR](docs/adr/0001-handheld-receiver-platform.md), and the reproducible
-> Python env. The PiSugar 3 and SRH805S antenna are still on order, so the radio/OLED
-> haven't been bench-brought-up yet, and the receiver firmware (8.2–8.5) isn't written.
+> **Status (2026-08-31): 8.2 BUILT and BENCH-VERIFIED ON AIR.** The receiver
+> (`app/`) ran against the live sled on the bench — 56 frames accepted, zero
+> decode/render/RX errors — and runs as `apogee-handheld.service`, enabled for
+> boot: every power-on brings up the OLED idle page unaided. Architecture:
+> [ADR 0002](docs/adr/0002-receiver-reuses-ground-modules.md) — the app reuses
+> the ground decoder, `LoRaConfig`, and `pad_baseline` from the repo checkout;
+> no handheld copies. **Parked:** the PiSugar's I²C is dead (powers the board,
+> `0x57`/`0x68` absent; `pisugar-server` answers "I2C not connected") — pogo-pin
+> contact needs solder work, so battery %, RTC, and button events wait on that.
+> 8.3 (multi-node) waits on the Epic 7 lander; 8.4–8.5 (game) not started.
 
 ## Hardware (Epic 8.1)
 
@@ -75,16 +80,43 @@ Pi OS Trixie already provides zram swap via `systemd-zram-generator`
 fights it over `/dev/zram0` and leaves a failed unit. The built-in is already optimal —
 leave it alone. (Trixie also dropped `dphys-swapfile`.)
 
+## Access & operations (recorded 2026-08-31 — facts live HERE, cite elsewhere)
+
+- **Hostname `apogee-handheld`** (mDNS `apogee-handheld.local`), user
+  **`rocketman`**, key-only SSH. On the home **WideRoad** Wi-Fi (its 2.4 GHz
+  side — the Zero's radio proved it exists by scanning it), NM profile
+  `WideRoad` at autoconnect-priority 100; the original `WideRoadGuest`
+  netplan profile remains as fallback. **Do not develop against the guest
+  network**: its client isolation intermittently blocks ICMP, mDNS, *and*
+  TCP between clients (an afternoon was spent learning this).
+- **Service:** `apogee-handheld.service` (systemd, enabled) runs
+  `~/radio/.venv/bin/python -m handheld.app.main` from the repo checkout at
+  `~/lora-rocket-telemetry` (deploys are `git pull`, per ADR 0002). Stop
+  prints a counters line (`accepted/decode_errors/foreign_sys/rx_errors/`
+  `render_errors`) — restart it to sample counters.
+- **PiSugar:** powers the board; USB power charges the battery but does
+  **not** boot the Pi — short-press the PiSugar button. Its I²C is dead
+  pending solder (see Status), so no battery/RTC/buttons yet.
+  `pisugar-server` is installed (web UI :8421, TCP 8423).
+- **USB-ethernet gadget staged, unverified:** `dwc2`/`g_ether` with pinned
+  MACs in `/boot/firmware/` (+ NM profile `usb-gadget`, link-local). A known
+  *data* micro-USB cable into the middle port ("USB", beside mini-HDMI)
+  should make `ssh apogee-handheld.local` work over the cable; every cable
+  tried so far was power-only.
+
 ## This folder
 
 | Path | What |
 |------|------|
+| `app/` | the 8.2 receiver: `viewmodel`/`render`/`rx`/`oled`/`loop` (pure, host-tested) + `main.py` (thin Blinka glue) |
+| `tests/` | host tests — run `.venv-test/bin/pytest handheld/tests/` from the repo root (Mac) |
 | [`docs/adr/0001-handheld-receiver-platform.md`](docs/adr/0001-handheld-receiver-platform.md) | why Pi Zero 2 W + bonnet + PiSugar |
+| [`docs/adr/0002-receiver-reuses-ground-modules.md`](docs/adr/0002-receiver-reuses-ground-modules.md) | why the app imports ground modules from the checkout (no copies, no packaging) |
 | `pyproject.toml`, `uv.lock`, `.python-version` | the verified, reproducible bonnet env (mirrors `~/radio` on the device) |
 
 ## Roadmap (Epic 8)
 
-- **8.2** Receiver firmware — listen to v1, OLED shows altitude / LIFTOFF / apogee
-- **8.3** Multi-node — track `SRC:1` (rocket) + `SRC:2` (lander) on one screen
+- **8.2** ✅ Receiver firmware — BUILT + on-air bench 2026-08-31 (see Status). Boot-test open: first unattended power-on not yet observed.
+- **8.3** Multi-node — track `SRC:1` (rocket) + `SRC:2` (lander) on one screen *(waits on the Epic 7 lander)*
 - **8.4** Guess-the-apogee game — kids dial a guess on the buttons; apogee reveals the winner
 - **8.5** Kid-tweakable messages + rules

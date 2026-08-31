@@ -3,7 +3,7 @@
 Living status doc. **Read this first to resume.** Update it whenever an epic/task or
 branch state changes. (Conventions and how-to-build live in [`CLAUDE.md`](../CLAUDE.md).)
 
-_Last updated: **2026-08-07** (Claude, on Mac + Pi 5). See HANDOFF below for the live state. Earlier context: **This session: `feat/panel-leds` MERGED and
+_Last updated: **2026-08-31** (Claude, on Mac + the Epic 8 Zero). See the 2026-08-31 HANDOFF below for the live state. Earlier context: **This session: `feat/panel-leds` MERGED and
 pushed** — the six-LED supervisor is live and enabled for boot on `apogee-gs`. Also landed three
 pieces of process that outlive the branch: the **sanctioned deploy path**, the canonical
 **"designed but INERT"** register, and **"cite, don't restate"**. Repo-wide **branch cleanup**
@@ -16,6 +16,38 @@ cleanly); **OLED rewire verified** (the "dark" was a no-idle-page firmware gap, 
 logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor shell/unit — see
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
+
+## HANDOFF — 2026-08-31: EPIC 8 HANDHELD — 8.2 BUILT, ON-AIR VERIFIED, IN SERVICE
+
+**The kids' handheld went from "platform groundwork" to a working, self-booting
+mission-control receiver in one session.** Five TDD slices (30 host tests), each
+committed/merged/pushed on Frank's per-slice gate — `cd535ee` viewmodel,
+`ca4e5d1` renderer, `8484bf3` RX glue, `081914d` loop+entry, `2312ff4` AGL
+baseline; per-slice detail lives in those commit messages, cite them.
+Architecture is [`handheld/docs/adr/0002`](../handheld/docs/adr/0002-receiver-reuses-ground-modules.md):
+the app imports the ground decoder, `LoRaConfig` and `pad_baseline` from the
+repo checkout — no handheld copies of any contract.
+
+**ON-AIR BENCH PASSED (sled → bonnet, real RF): `accepted=56, decode_errors=0,
+foreign_sys=0, rx_errors=0, render_errors=0`** from the service's SIGTERM
+counters line. Close-range RSSI −45 dBm. The first live pad display read
+**−85 ft / PK 0**, which is raw baro plus `Max`'s 0-until-flight contract
+(`firmware/src/main.cpp:402`) — slice 5 fixed both by reusing the ground's
+`pad_baseline` (rolling on pad, frozen at liftoff, raw fallback mid-flight).
+
+**Operational facts (hostname, Wi-Fi move to WideRoad, the guest-network
+isolation trap, service, PiSugar state, USB gadget) are recorded ONCE in
+[`handheld/README.md`](../handheld/README.md) "Access & operations" — cite it.**
+
+**OPEN / PARKED, with owners:**
+- **Boot test (next power-cycle observes it):** `apogee-handheld.service` is
+  enabled but an unattended power-on → idle-page has not yet been WITNESSED.
+- **PiSugar I²C dead — physical, Frank:** pogo-pin contact needs solder work.
+  Until then no battery %, RTC, or button events; wake-on-charge lessons from
+  the ground box carry over once it's on the bus.
+- **USB gadget unverified — needs a known-data micro-USB cable.**
+- **8.4 guess-the-apogee is the next code work** (buttons D5/D6/D12 idle);
+  **8.3 multi-node waits on the Epic 7 lander.**
 
 ## FLIGHT DAY 2026-08-25 — F2/F3 FLOWN, CAPTURED, PUBLISHED (same day)
 
@@ -924,7 +956,7 @@ method below. |
 | 5 — TEENSY 4.1 SLED RESPIN (onboard fusion + SD recorder) | 🟡 **PLANNED — [`docs/epic5-teensy-respin.md`](epic5-teensy-respin.md)**; closed question (attitude is onboard or not live) + arithmetic in "EPIC 5 RE-SCOPED" above. Gated on F2 flying first. 5.1 hardware evidence done (LSM6DSOX 0x6a + LIS3MDL 0x1c; WHO_AM_I 0x6C/0x3D); raw channels reach the wire via the E+F pad frame (ADR 0005 A1.3). `Roll`/`Spin` stay reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
-| 8 — Kids' handheld | 🟡 **8.1 platform groundwork merged** (PR #1, `handheld/`). Bench bring-up pending PiSugar 3 + SRH805S antenna (both ordered). 8.2–8.5 not started. |
+| 8 — Kids' handheld | 🟢 **8.2 BUILT + ON-AIR BENCH-VERIFIED 2026-08-31** (see the 2026-08-31 handoff at top; ops facts in `handheld/README.md`). 8.1 closed except the PiSugar I²C solder fix (parked, physical). 8.3 waits on Epic 7; 8.4–8.5 not started. |
 
 ## Open branches (pending review/merge)
 

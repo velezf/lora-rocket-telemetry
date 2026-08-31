@@ -22,12 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ground.rx.sx127x import LoRaConfig
 
-from handheld.app.loop import LoopCounters, render_tick, rx_step
+from handheld.app.battery import read_battery_pct
+from handheld.app.loop import LoopCounters, battery_tick, render_tick, rx_step
 from handheld.app.oled import HeartbeatDisplay
 from handheld.app.rx import RxCounters, apply_settings
 from handheld.app.viewmodel import HandheldModel
 
 RENDER_PERIOD_S = 1.0
+BATTERY_EVERY_TICKS = 30   # gauge poll cadence: every 30 render ticks (~30 s)
 
 
 def build_radio(cfg: LoRaConfig):
@@ -61,8 +63,12 @@ def main() -> int:
     stop = threading.Event()
 
     def render_loop():
+        tick = 0
         while not stop.is_set():
+            if tick % BATTERY_EVERY_TICKS == 0:
+                battery_tick(model, read_battery_pct, time.monotonic(), counters)
             render_tick(model, display, time.monotonic(), counters)
+            tick += 1
             stop.wait(RENDER_PERIOD_S)
 
     t = threading.Thread(target=render_loop, name="render", daemon=True)
@@ -80,7 +86,8 @@ def main() -> int:
     print(f"[handheld] stopped: accepted={rx_counters.accepted} "
           f"decode_errors={rx_counters.decode_errors} "
           f"foreign_sys={model.foreign_sys} rx_errors={counters.rx_errors} "
-          f"render_errors={counters.render_errors}", flush=True)
+          f"render_errors={counters.render_errors} "
+          f"battery_errors={counters.battery_errors}", flush=True)
     return 0
 
 

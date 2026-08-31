@@ -24,6 +24,7 @@ class View:
     age_s: float | None          # seconds since last accepted frame
     liftoff_banner: bool
     apogee_reveal: bool
+    battery_pct: int | None = None   # handheld's own charge (pisugar-server)
 
 
 class HandheldModel:
@@ -49,6 +50,13 @@ class HandheldModel:
         self._pad_hist: list[tuple[float, int]] = []
         self._baseline: int | None = None
         self._baseline_frozen = False
+        self._battery_pct: int | None = None
+
+    def set_battery(self, pct: int | None, mono: float) -> None:
+        """Latest gauge reading; None (a failed read) keeps the last known —
+        a stale charge number beats a vanishing one on a slow-moving value."""
+        if pct is not None:
+            self._battery_pct = pct
 
     def observe(self, pkt, rssi_dbm: float, mono: float) -> bool:
         """Fold one decoded frame in. Returns True iff the frame was accepted."""
@@ -104,10 +112,12 @@ class HandheldModel:
 
     def snapshot(self, mono: float) -> View:
         if self._last_mono is None:
-            return View("idle", None, None, None, None, None, False, False)
+            return View("idle", None, None, None, None, None, False, False,
+                        self._battery_pct)
         age = mono - self._last_mono
         mode = "stale" if age > self._stale_s else "live"
         banner = (self._liftoff_mono is not None
                   and mono - self._liftoff_mono <= self._banner_s)
         return View(mode, self._alt_ft, self._peak_ft, self._st, self._rssi,
-                    round(age, 3), banner, self._apogee_revealed)
+                    round(age, 3), banner, self._apogee_revealed,
+                    self._battery_pct)

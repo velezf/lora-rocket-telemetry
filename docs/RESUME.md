@@ -51,16 +51,19 @@ isolation trap, service, PiSugar state, USB gadget) are recorded ONCE in
   (Bonus fact learned via the boot ROM: a Zero that enumerates as
   `BCM2710 Boot` is powered fine and simply cannot find its SD card.)
 
+**PISUGAR INTERFACE FIXED — Frank's SECOND solder pass, verified live
+2026-08-31:** `0x57`+`0x68` on the bus, battery gauge reading 88 %, RTC on
+correct wall time, the stack running on PiSugar power ALONE with a clean
+unattended boot that picked up the sled. (The first pass had killed power
+too — one suspect, the pogo/pad contact, was right.) The ported Pi 5 config
+is therefore now LIVE, not armed: wake-on-charge, RTC sync, anti-mistouch,
+5 %/30 s auto-shutdown, double-tap → clean poweroff, soft_poweroff.
+**Slice 6 followed the same hour: battery % on the OLED idle page**
+(pisugar-server TCP `get battery` → model → render; 34 host tests).
+Double-tap gesture and wake-on-charge still await their first field-style
+observation on THIS box.
+
 **OPEN / PARKED, with owners:**
-- **PiSugar board-to-board interface — physical, Frank.** The 2026-08-31
-  solder attempt did NOT restore I²C (`0x57`/`0x68` still absent), and the
-  PiSugar now also fails to SUPPLY power to the Pi — two symptoms, one
-  suspect: the pogo-pin/pad contact. Charge LEDs work, so the battery side
-  is alive. Meanwhile the Zero runs on USB.
-- **PiSugar CONFIG PORTED from the Pi 5, ARMED but UNVERIFIABLE** until the
-  bus lives: wake-on-charge, RTC sync, anti-mistouch, 5 %/30 s auto-shutdown,
-  double-tap → clean poweroff, soft_poweroff. Backup beside the config; web
-  UI details in `handheld/README.md`.
 - **The Pi 5's pisugar web UI has NO AUTH** (`:8421` open on the LAN — the
   Zero has auth, the reference box doesn't). **Frank HOLDS on changing it**;
   recorded so the gap is a named fact, not a surprise.

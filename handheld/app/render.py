@@ -29,6 +29,8 @@ def render(view) -> Image.Image:
         d.text((0, 0), "APOGEE ZEPHYR", font=_SMALL, fill=1)
         d.text((0, 11), "listening for", font=_SMALL, fill=1)
         d.text((0, 21), "the rocket...", font=_SMALL, fill=1)
+        if view.battery_pct is not None:
+            d.text((96, 0), f"{view.battery_pct}%", font=_SMALL, fill=1)
         return img
 
     if view.liftoff_banner:

@@ -42,12 +42,13 @@ class HandheldModel:
         self._liftoff_mono: float | None = None
         self._apogee_revealed = False
 
-    def observe(self, pkt, rssi_dbm: float, mono: float) -> None:
+    def observe(self, pkt, rssi_dbm: float, mono: float) -> bool:
+        """Fold one decoded frame in. Returns True iff the frame was accepted."""
         if not pkt.ok:
-            return
+            return False
         if pkt.fields.get("SYS") not in self._allowed_sys:
             self.foreign_sys += 1
-            return
+            return False
 
         st = pkt.fields.get("St")
         alt = pkt.fields.get("ALT")
@@ -73,6 +74,7 @@ class HandheldModel:
             self._st = st
         self._rssi = rssi_dbm
         self._last_mono = mono
+        return True
 
     def snapshot(self, mono: float) -> View:
         if self._last_mono is None:

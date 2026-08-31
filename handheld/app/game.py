@@ -56,6 +56,8 @@ class GuessGame:
         self.confirming = False
         self._dial_touched = False
         self._seen_flight = False
+        self._stashed: list[int] | None = None   # real-flight guesses parked
+                                                 # during an armed side quest
 
     @property
     def entering_name(self) -> str:
@@ -81,9 +83,18 @@ class GuessGame:
         return self.phase == "watching" and not self._seen_flight
 
     def reset(self) -> None:
-        """Start over (the #5+#6 chord, or the sled's next-flight St cycle)."""
+        """Start over (the #5+#6 chord, or the sled's next-flight St cycle).
+
+        From a side quest (real guesses stashed) the chord means "leave the
+        quiz", so it RESTORES the armed game rather than wiping the kids'
+        real-flight guesses; a second chord from plain armed is the full
+        start-over as always."""
+        stash = self._stashed
         self.__init__(step_ft=self._step, players=self.players,
                       rule=self.rule, debounce_s=self._debounce_s)
+        if stash is not None:
+            self.guesses = list(stash)
+            self.phase = "watching"          # armed again, awaiting launch
 
     # -- buttons ------------------------------------------------------------
     def _debounced(self, mono: float) -> bool:
@@ -124,7 +135,27 @@ class GuessGame:
         self._dial_touched = True
 
     def press_lock(self, mono: float) -> None:
-        if self.phase not in ("rules", "rocket", "motor", "entry") or self._debounced(mono):
+        if (self.phase not in ("rules", "rocket", "motor", "entry",
+                               "watching", "reveal")
+                or self._debounced(mono)):
+            return
+        if self.phase == "watching":
+            if self.armed and self.mode == "live":
+                # side quest: play RocketLab while awaiting launch — the
+                # real-flight guesses are STASHED, never lost
+                self._stashed = list(self.guesses)
+                self.guesses = []
+                self.confirming = False
+                self.mode = "lab"
+                self.phase = "rocket"
+            return
+        if self.phase == "reveal":
+            if self.mode == "lab":           # another round while waiting
+                self.guesses = []
+                self.winner = None
+                self.peak_ft = None
+                self.confirming = False
+                self.phase = "rocket"
             return
         if self.phase == "rules":            # game confirmed
             if self._MENU[self._menu_i][0] == "lab":
@@ -166,10 +197,13 @@ class GuessGame:
             self._seen_flight = True
             if self.mode == "lab":
                 # A REAL LIFTOFF PREEMPTS THE QUIZ (decided 2026-08-31):
-                # discard the lab round; the flight owns the screen
+                # the lab round is discarded, the flight owns the screen —
+                # and stashed real-flight guesses come back for the reveal
                 self.mode = "live"
                 self.phase = "watching"
-                self.guesses = []
+                self.guesses = (list(self._stashed)
+                                if self._stashed is not None else [])
+                self._stashed = None
                 self.confirming = False
         # St RETURNED to 0 after a flight = next launch: fresh round. The
         # transition matters: plain pad frames must NOT reset a locked-in

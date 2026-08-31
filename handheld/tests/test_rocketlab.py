@@ -133,3 +133,53 @@ def test_lab_reveal_screen_shows_sim_number():
     g2.press_lock(mono=3.0); g2.press_lock(mono=3.5)
     assert g2.phase == "reveal" and g2.peak_ft != g.peak_ft
     assert render(V(), game=g2).tobytes() != a.tobytes()
+
+
+def armed_game(players=("Bacon", "Dragon")):
+    """A live game with real-flight guesses locked in, awaiting launch."""
+    g = GuessGame(players=players)
+    g.press_lock(mono=0.0)               # menu: Closest
+    g.press_up(mono=1.0)                 # first kid dials 325
+    t = 2.0
+    for _ in players:                    # each kid: ask + confirm
+        g.press_lock(mono=t); g.press_lock(mono=t + 0.5)
+        t += 1.0
+    assert g.armed and g.guesses == [325] * len(players)
+    return g
+
+
+def test_armed_kids_can_side_quest_into_the_lab():
+    g = armed_game()
+    g.press_lock(mono=6.0)               # #12 from armed = play while waiting
+    assert g.mode == "lab" and g.phase == "rocket"
+    assert g.guesses == []               # the lab round has its own guesses
+    # the real-flight guesses are stashed, not lost
+    g.on_view(V(st=1, liftoff_banner=True))
+    assert g.mode == "live" and g.phase == "watching"
+    assert g.guesses == [325, 325]       # restored for the real reveal
+    g.on_view(V(st=2, apogee_reveal=True, peak_ft=330))
+    assert g.winner == ("Bacon", 325)    # scored on the ORIGINAL guesses
+
+
+def test_chord_from_side_quest_returns_to_armed_not_menu():
+    g = armed_game()
+    g.press_lock(mono=6.0)               # into the lab
+    g.press_lock(mono=7.0)               # rocket picked
+    g.reset()                            # #5+#6: leave the quiz
+    assert g.mode == "live" and g.armed
+    assert g.guesses == [325, 325]       # armed exactly as before
+    g.reset()                            # chord again from plain armed:
+    assert g.phase == "rules"            # full start-over, as always
+
+
+def test_lab_reveal_lock_starts_another_round_while_waiting():
+    g = armed_game(players=("Bacon",))
+    g.press_lock(mono=6.0)               # side quest
+    g.press_lock(mono=7.0)               # rocket
+    g.press_lock(mono=8.0)               # motor
+    g.press_lock(mono=9.0); g.press_lock(mono=10.0)  # Bacon guesses
+    assert g.phase == "reveal"           # sim answered
+    g.press_lock(mono=11.0)              # #12: another round
+    assert g.phase == "rocket" and g.mode == "lab"
+    g.on_view(V(st=1))                   # the real launch, three rounds deep
+    assert g.guesses == [325]            # still the real guess

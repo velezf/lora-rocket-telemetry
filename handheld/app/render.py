@@ -24,7 +24,7 @@ def _game_dial_line(game) -> str | None:
     if game is None:
         return None
     if game.armed:
-        return f"LOCKED x{len(game.guesses)} - fly!"
+        return f"LOCKED x{len(game.guesses)} #12=play"
     if game.phase == "rules":
         pick = "Closest" if game.rule == "closest" else "NoOver"
         return f"GAME? {pick}"

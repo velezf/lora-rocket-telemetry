@@ -35,7 +35,40 @@ def _game_dial_line(game) -> str | None:
     return None
 
 
+def _render_lab(game) -> Image.Image:
+    """RocketLab's dedicated full screens — an offline mode, so no ALT/dBm
+    (field ask 2026-08-31); the rocket picker shows MASS, not just a name."""
+    img = Image.new("1", (WIDTH, HEIGHT), 0)
+    d = ImageDraw.Draw(img)
+    if game.phase == "rocket":
+        name, mass_g, diam_mm = game.rocket_row
+        d.text((0, 0), "ROCKET?", font=_SMALL, fill=1)
+        d.text((0, 10), name, font=_HERO, fill=1)
+        d.text((0, 22), f"{mass_g}g", font=_SMALL, fill=1)
+        d.text((48, 22), f"{diam_mm}mm", font=_SMALL, fill=1)
+    elif game.phase == "motor":
+        code, impulse, avg_n, _, _ = game.motor_row
+        d.text((0, 0), "MOTOR?", font=_SMALL, fill=1)
+        d.text((0, 10), code, font=_HERO, fill=1)
+        d.text((48, 22), f"{impulse:g}Ns", font=_SMALL, fill=1)
+        d.text((96, 22), f"{avg_n:g}N", font=_SMALL, fill=1)
+    elif game.phase == "entry":
+        d.text((0, 0), f"{game.rocket_row[0]} + {game.motor_row[0]}",
+               font=_SMALL, fill=1)
+        d.text((0, 20), _game_dial_line(game) or "", font=_SMALL, fill=1)
+    else:                                    # reveal: the sim's verdict
+        d.text((0, 0), "SIM SAYS", font=_SMALL, fill=1)
+        d.text((0, 10), f"{game.peak_ft}ft", font=_HERO, fill=1)
+        if game.winner is not None:
+            name, guess = game.winner
+            d.text((70, 8), f"{name}!", font=_SMALL, fill=1)
+            d.text((70, 20), f"wins {guess}", font=_SMALL, fill=1)
+    return img
+
+
 def render(view, game=None) -> Image.Image:
+    if game is not None and game.mode == "lab":
+        return _render_lab(game)
     img = Image.new("1", (WIDTH, HEIGHT), 0)
     d = ImageDraw.Draw(img)
     dial = _game_dial_line(game)

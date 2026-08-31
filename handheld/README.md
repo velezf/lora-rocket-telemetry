@@ -94,18 +94,19 @@ leave it alone. (Trixie also dropped `dphys-swapfile`.)
   `~/lora-rocket-telemetry` (deploys are `git pull`, per ADR 0002). Stop
   prints a counters line (`accepted/decode_errors/foreign_sys/rx_errors/`
   `render_errors`) — restart it to sample counters.
-- **PiSugar:** board-to-board interface is DEAD both ways as of 2026-08-31 —
-  I²C absent (`0x57`/`0x68`) AND it no longer supplies power to the Pi; the
-  2026-08-31 solder attempt fixed neither. One suspect for both: pogo-pin/pad
-  contact (charge LEDs work, so the battery side is alive). The Zero runs on
-  USB meanwhile. Full PiSugar stack IS installed (`pisugar-server` +
-  `pisugar-poweroff` + `pisugar-programmer`, 2.3.2-1 — matches the Pi 5), and
-  the Pi 5's operational config was ported 2026-08-31 (wake-on-charge, RTC
-  sync, anti-mistouch, 5 %/30 s auto-shutdown, double-tap → clean poweroff,
-  soft_poweroff; backup `config.json.bak-20260831`) — armed, takes effect
-  when the bus lives. Web UI `http://apogee-handheld.local:8421`, user
-  `admin`; password is Frank's standard PiSugar one (secrets never in this
-  repo — same rule as the hotspot secret).
+- **PiSugar: WORKING since Frank's second solder pass, 2026-08-31** —
+  `0x57`/`0x68` on the bus, battery gauge live, RTC on wall time, and it
+  powers the stack alone (verified with a clean unattended boot that picked
+  up the sled). Full stack installed (`pisugar-server` + `pisugar-poweroff`
+  + `pisugar-programmer`, 2.3.2-1 — matches the Pi 5) with the Pi 5's
+  operational config ported and now LIVE: wake-on-charge, RTC sync,
+  anti-mistouch, 5 %/30 s auto-shutdown, **double-tap → clean poweroff**,
+  soft_poweroff (backup `config.json.bak-20260831`). Web UI
+  `http://apogee-handheld.local:8421`, user `admin`; password is Frank's
+  standard PiSugar one (secrets never in this repo — same rule as the
+  hotspot secret). The receiver polls `get battery` on TCP :8423 every ~30 s
+  for the idle-page gauge. History of the pogo-pin failure: RESUME's
+  2026-08-31 handoff.
 - **USB-ethernet gadget VERIFIED 2026-08-31:** one data micro-USB cable from
   the middle port ("USB", beside mini-HDMI) to the Mac supplies power AND a
   link-local network — the Mac gets an interface at the pinned MAC and
@@ -125,7 +126,7 @@ leave it alone. (Trixie also dropped `dphys-swapfile`.)
 
 ## Roadmap (Epic 8)
 
-- **8.2** ✅ Receiver firmware — BUILT + on-air bench 2026-08-31 (see Status). Boot test WITNESSED same day: unattended power-on → idle page, service active at 0 min. AGL fix verified on the running bonnet (`-85ft` → `0ft`).
+- **8.2** ✅ Receiver firmware — BUILT + on-air bench 2026-08-31 (see Status). Boot test WITNESSED same day: unattended power-on → idle page, service active at 0 min. AGL fix verified on the running bonnet (`-85ft` → `0ft`). Slice 6: battery % on the idle page (pisugar-server gauge).
 - **8.3** Multi-node — track `SRC:1` (rocket) + `SRC:2` (lander) on one screen *(waits on the Epic 7 lander)*
 - **8.4** Guess-the-apogee game — kids dial a guess on the buttons; apogee reveals the winner
 - **8.5** Kid-tweakable messages + rules

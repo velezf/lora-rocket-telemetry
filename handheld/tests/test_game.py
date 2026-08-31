@@ -9,6 +9,12 @@ from handheld.app.game import GuessGame
 from handheld.app.viewmodel import View
 
 
+def lock(g, mono):
+    """A completed lock is TWO presses (ask, then confirm), debounce-spaced."""
+    g.press_lock(mono=mono)
+    g.press_lock(mono=mono + 0.2)
+
+
 def V(**kw):
     base = dict(mode="live", alt_ft=0, peak_ft=0, st=0, rssi_dbm=-50.0,
                 age_s=0.1, liftoff_banner=False, apogee_reveal=False,
@@ -43,20 +49,20 @@ def test_lock_banks_guess_and_prompts_the_next_kid_by_name():
     g = GuessGame(start_ft=300)          # default roster: Bacon, HnyBsct, Dragon
     assert g.entering_name == "Bacon"
     g.press_up(mono=1.0)                 # Bacon dials 325
-    g.press_lock(mono=2.0)
+    lock(g, 2.0)
     assert g.guesses == [325]
     assert g.entering_name == "HnyBsct"  # next kid prompted by name
     assert g.current_guess == 325        # dial starts where Bacon left it
     g.press_down(mono=3.0)
-    g.press_lock(mono=4.0)
+    lock(g, 4.0)
     assert g.entering_name == "Dragon"
     assert g.guesses == [325, 300]
 
 
 def test_roster_end_closes_entry():
     g = GuessGame(players=("Bacon", "Dragon"))
-    g.press_lock(mono=1.0)
-    g.press_lock(mono=2.0)
+    lock(g, 1.0)
+    lock(g, 2.0)
     assert g.phase == "watching"         # every kid seated
     g.press_up(mono=3.0)                 # dead button
     assert g.guesses == [300, 300]
@@ -74,17 +80,17 @@ def test_liftoff_closes_the_betting_window():
 
 def test_reveal_names_the_closest_and_ties_go_to_the_earlier_kid():
     g = GuessGame()
-    g.press_lock(mono=1.0)               # Bacon: 300
+    lock(g, 1.0)                         # Bacon: 300
     g.press_up(mono=2.0); g.press_up(mono=3.0); g.press_up(mono=4.0)
-    g.press_lock(mono=5.0)               # HnyBsct: 375
+    lock(g, 5.0)                         # HnyBsct: 375
     g.on_view(V(st=1))
     g.on_view(V(st=2, apogee_reveal=True, peak_ft=412))
     assert g.phase == "reveal"
     assert g.winner == ("HnyBsct", 375)  # |375-412| < |300-412|
     # tie case: two equal distances -> the earlier kid in the roster
     g2 = GuessGame()
-    g2.press_lock(mono=1.0)              # Bacon: 300
-    g2.press_lock(mono=2.0)              # HnyBsct: 300
+    lock(g2, 1.0)                        # Bacon: 300
+    lock(g2, 2.0)                        # HnyBsct: 300
     g2.on_view(V(st=2, apogee_reveal=True, peak_ft=350))
     assert g2.winner == ("Bacon", 300)
 
@@ -119,7 +125,7 @@ def test_render_tick_drives_game_from_the_displayed_snapshot():
 
 def test_next_flight_resets_game_to_fresh_entry():
     g = GuessGame()
-    g.press_lock(mono=1.0)
+    lock(g, 1.0)
     g.on_view(V(st=2, apogee_reveal=True, peak_ft=400))
     assert g.phase == "reveal"
     # sled power-cycled for the next launch: pad frames again
@@ -130,10 +136,10 @@ def test_next_flight_resets_game_to_fresh_entry():
 
 def test_no_over_rule_is_price_is_right():
     g = GuessGame(rule="no-over")
-    g.press_lock(mono=1.0)                        # Bacon: 300
+    lock(g, 1.0)                                  # Bacon: 300
     g.press_up(mono=2.0); g.press_up(mono=3.0)
     g.press_up(mono=4.0); g.press_up(mono=5.0)
-    g.press_lock(mono=6.0)                        # HnyBsct: 400
+    lock(g, 6.0)                                  # HnyBsct: 400
     g.on_view(V(st=2, apogee_reveal=True, peak_ft=390))
     # 400 is CLOSER (10 vs 90) but busted: under-only wins
     assert g.winner == ("Bacon", 300)
@@ -142,9 +148,9 @@ def test_no_over_rule_is_price_is_right():
 def test_no_over_rule_everyone_busts_nobody_wins():
     g = GuessGame(rule="no-over")
     g.press_up(mono=1.0)                          # Bacon: 325
-    g.press_lock(mono=2.0)
+    lock(g, 2.0)
     g.press_up(mono=3.0)                          # HnyBsct: 350
-    g.press_lock(mono=4.0)
+    lock(g, 4.0)
     g.on_view(V(st=2, apogee_reveal=True, peak_ft=200))
     assert g.phase == "reveal"
     assert g.winner is None                       # the rocket wins
@@ -153,6 +159,38 @@ def test_no_over_rule_everyone_busts_nobody_wins():
 def test_exact_guess_wins_under_both_rules():
     for rule in ("closest", "no-over"):
         g = GuessGame(rule=rule)
-        g.press_lock(mono=1.0)                    # Bacon: 300
+        lock(g, 1.0)                              # Bacon: 300
         g.on_view(V(st=2, apogee_reveal=True, peak_ft=300))
         assert g.winner == ("Bacon", 300), rule
+
+
+def test_lock_requires_a_confirm_press():
+    g = GuessGame()
+    g.press_up(mono=1.0)                 # Bacon dials 325
+    g.press_lock(mono=2.0)               # first press: asks, banks NOTHING
+    assert g.confirming
+    assert g.guesses == []
+    assert g.entering_name == "Bacon"
+    g.press_lock(mono=3.0)               # second press: banked
+    assert not g.confirming
+    assert g.guesses == [325]
+    assert g.entering_name == "HnyBsct"
+
+
+def test_dialing_cancels_the_confirm():
+    g = GuessGame()
+    g.press_lock(mono=1.0)               # "Bacon 300 OK?"
+    assert g.confirming
+    g.press_up(mono=2.0)                 # no — more altitude
+    assert not g.confirming
+    assert g.current_guess == 325
+    assert g.guesses == []               # nothing banked by the detour
+
+
+def test_liftoff_banks_even_mid_confirm():
+    g = GuessGame()
+    g.press_up(mono=1.0)
+    g.press_lock(mono=2.0)               # sitting at "Bacon 325 OK?"
+    g.on_view(V(st=1, liftoff_banner=True))
+    assert g.guesses == [325]            # the countdown answered for them
+    assert g.phase == "watching"

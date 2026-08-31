@@ -22,6 +22,8 @@ _ST_LABEL = {0: "PAD", 1: "UP!", 2: "DOWN"}
 def _game_dial_line(game) -> str | None:
     """The entry-phase overlay text, or None when the game has none."""
     if game is not None and game.phase == "entry":
+        if game.confirming:
+            return f"{game.entering_name} {game.current_guess} OK?"
         return f"{game.entering_name}? {game.current_guess}ft"
     return None
 
@@ -54,17 +56,26 @@ def render(view, game=None) -> Image.Image:
             name, guess = game.winner
             d.text((70, 8), f"{name}!", font=_SMALL, fill=1)
             d.text((70, 20), f"wins {guess}", font=_SMALL, fill=1)
+        d.text((66, 22), _ST_LABEL.get(view.st, "?"), font=_SMALL, fill=1)
+        if view.mode == "stale":
+            d.text((92, 22), f"?{view.age_s:.0f}s", font=_SMALL, fill=1)
+        elif view.rssi_dbm is not None:
+            d.text((98, 22), f"{view.rssi_dbm:.0f}", font=_SMALL, fill=1)
+        return img
+
+    # live/stale page. RSSI lives TOP-RIGHT (field feedback 2026-08-31: it
+    # overlapped the dial when both shared the bottom row).
+    d.text((0, 0), f"{view.alt_ft}ft", font=_HERO, fill=1)
+    if view.rssi_dbm is not None:
+        d.text((100, 0), f"{view.rssi_dbm:.0f}", font=_SMALL, fill=1)
+    if dial:
+        # the dial owns the whole bottom row; the state word is redundant
+        # during betting (betting only happens on the pad)
+        d.text((0, 22), dial, font=_SMALL, fill=1)
     else:
-        d.text((0, 0), f"{view.alt_ft}ft", font=_HERO, fill=1)
-        # during guess entry the dial takes the PK slot (PK is 0 on a pad)
-        d.text((0, 22), dial or f"PK {view.peak_ft}", font=_SMALL, fill=1)
-
-    st = _ST_LABEL.get(view.st, "?")
-    d.text((66, 22), st, font=_SMALL, fill=1)
-
-    if view.mode == "stale":
-        d.text((92, 22), f"?{view.age_s:.0f}s", font=_SMALL, fill=1)
-    elif view.rssi_dbm is not None:
-        d.text((98, 22), f"{view.rssi_dbm:.0f}", font=_SMALL, fill=1)
+        d.text((0, 22), f"PK {view.peak_ft}", font=_SMALL, fill=1)
+        d.text((66, 22), _ST_LABEL.get(view.st, "?"), font=_SMALL, fill=1)
+        if view.mode == "stale":
+            d.text((92, 22), f"?{view.age_s:.0f}s", font=_SMALL, fill=1)
 
     return img

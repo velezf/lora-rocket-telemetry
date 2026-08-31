@@ -39,13 +39,31 @@ counters line. Close-range RSSI −45 dBm. The first live pad display read
 isolation trap, service, PiSugar state, USB gadget) are recorded ONCE in
 [`handheld/README.md`](../handheld/README.md) "Access & operations" — cite it.**
 
+**VERIFIED LATER THE SAME DAY (all three were open at first writing):**
+- **Boot test WITNESSED:** unattended power-on → `apogee-handheld.service`
+  active at 0 min uptime, idle page up with nobody touching anything.
+- **Slice 5 verified on the RUNNING artifact:** the bonnet that read
+  `-85ft PK 0` before the fix read `0ft PK 0 PAD -44` after deploy — the
+  test case observed live on real RF, not just green in pytest.
+- **USB-ethernet gadget VERIFIED end-to-end:** `en6` appeared on the Mac at
+  the pinned MAC, link active, SSH over the cable. One data cable into the
+  Zero's "USB" port now provides power + network with no router involved.
+  (Bonus fact learned via the boot ROM: a Zero that enumerates as
+  `BCM2710 Boot` is powered fine and simply cannot find its SD card.)
+
 **OPEN / PARKED, with owners:**
-- **Boot test (next power-cycle observes it):** `apogee-handheld.service` is
-  enabled but an unattended power-on → idle-page has not yet been WITNESSED.
-- **PiSugar I²C dead — physical, Frank:** pogo-pin contact needs solder work.
-  Until then no battery %, RTC, or button events; wake-on-charge lessons from
-  the ground box carry over once it's on the bus.
-- **USB gadget unverified — needs a known-data micro-USB cable.**
+- **PiSugar board-to-board interface — physical, Frank.** The 2026-08-31
+  solder attempt did NOT restore I²C (`0x57`/`0x68` still absent), and the
+  PiSugar now also fails to SUPPLY power to the Pi — two symptoms, one
+  suspect: the pogo-pin/pad contact. Charge LEDs work, so the battery side
+  is alive. Meanwhile the Zero runs on USB.
+- **PiSugar CONFIG PORTED from the Pi 5, ARMED but UNVERIFIABLE** until the
+  bus lives: wake-on-charge, RTC sync, anti-mistouch, 5 %/30 s auto-shutdown,
+  double-tap → clean poweroff, soft_poweroff. Backup beside the config; web
+  UI details in `handheld/README.md`.
+- **The Pi 5's pisugar web UI has NO AUTH** (`:8421` open on the LAN — the
+  Zero has auth, the reference box doesn't). **Frank HOLDS on changing it**;
+  recorded so the gap is a named fact, not a surprise.
 - **8.4 guess-the-apogee is the next code work** (buttons D5/D6/D12 idle);
   **8.3 multi-node waits on the Epic 7 lander.**
 

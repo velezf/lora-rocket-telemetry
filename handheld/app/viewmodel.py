@@ -42,6 +42,14 @@ class HandheldModel:
         self._liftoff_mono: float | None = None
         self._apogee_revealed = False
 
+        # AGL pad baseline — the SAME shared function the ground live path
+        # locks at flight_open (ground/flights/baseline.py). Rolling while
+        # St:0, FROZEN at the observed liftoff; None -> raw fallback (a
+        # handheld powered on mid-flight has no pad history to zero from).
+        self._pad_hist: list[tuple[float, int]] = []
+        self._baseline: int | None = None
+        self._baseline_frozen = False
+
     def observe(self, pkt, rssi_dbm: float, mono: float) -> bool:
         """Fold one decoded frame in. Returns True iff the frame was accepted."""
         if not pkt.ok:
@@ -58,17 +66,35 @@ class HandheldModel:
         # first hears the sky mid-flight has no liftoff moment to announce
         if st == 1 and self._st == 0:
             self._liftoff_mono = mono
+            self._baseline_frozen = True
         if st == 2:
             self._apogee_revealed = True
 
+        if st == 0 and alt is not None and not self._baseline_frozen:
+            from ground.flights.baseline import pad_baseline, trim_history
+            self._pad_hist.append((mono, alt))
+            self._pad_hist = trim_history(self._pad_hist)
+            # rolling verdict, None included: a pad that stops being quiet
+            # stops being a zero (the stability gate is the whole point)
+            self._baseline, _ = pad_baseline(self._pad_hist)
+
         if alt is not None:
-            self._alt_ft = alt
-            if self._peak_ft is None or alt > self._peak_ft:
-                self._peak_ft = alt
-        # the sled's own running max is authoritative: RF loss can hide the
-        # true peak from a receive-only listener
-        if maxft is not None and (self._peak_ft is None or maxft > self._peak_ft):
-            self._peak_ft = maxft
+            agl = alt - self._baseline if self._baseline is not None else alt
+            self._alt_ft = agl
+            if st == 0:
+                # pad: the peak follows the (rolling) zero — a rocket that has
+                # never moved has no peak to report
+                self._peak_ft = max(0, agl) if self._baseline is not None else 0
+            elif self._peak_ft is None or agl > self._peak_ft:
+                self._peak_ft = agl
+        # in flight the sled's own running max is authoritative (RF loss can
+        # hide the true peak from a receive-only listener); on the pad it is
+        # an artifact by contract — 0 until the first in-flight sample
+        # (firmware/src/main.cpp:402) — and must be ignored
+        if maxft is not None and st is not None and st != 0:
+            m_agl = maxft - self._baseline if self._baseline is not None else maxft
+            if self._peak_ft is None or m_agl > self._peak_ft:
+                self._peak_ft = m_agl
 
         if st is not None:
             self._st = st

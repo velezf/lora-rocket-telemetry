@@ -10,7 +10,8 @@ KID-TWEAKABLE KNOBS (Epic 8.5 — change these, restart the service):
     START_FT     where the dial starts
     DEBOUNCE_S   ignore button bounces closer together than this
 
-Phases: "entry" (on the pad, dialing) -> "watching" (flight; betting window
+Phases: "rules" (startup: pick the game — dial toggles Closest/NoOver,
+lock confirms; the RULE knob is the preselection) -> "entry" (on the pad, dialing) -> "watching" (flight; betting window
 closed at liftoff or when every seat is taken) -> "reveal" (apogee: the
 actual peak and whose guess came closest — ties go to the earlier kid).
 Locking is a TWO-press affair: #12 shows "<name> <guess> OK?" and only a
@@ -39,7 +40,7 @@ class GuessGame:
         self._debounce_s = debounce_s
         self._last_press: float | None = None
 
-        self.phase = "entry"                 # entry | watching | reveal
+        self.phase = "rules"                 # rules | entry | watching | reveal
         self.current_guess = start_ft
         self.guesses: list[int] = []         # locked, in PLAYERS order
         self.winner: tuple[str, int] | None = None   # (player name, guess)
@@ -58,22 +59,34 @@ class GuessGame:
         self._last_press = mono
         return False
 
+    def _toggle_rule(self) -> None:
+        self.rule = "no-over" if self.rule == "closest" else "closest"
+
     def press_up(self, mono: float) -> None:
-        if self.phase != "entry" or self._debounced(mono):
+        if self.phase not in ("rules", "entry") or self._debounced(mono):
+            return
+        if self.phase == "rules":
+            self._toggle_rule()
             return
         self.confirming = False              # dialing cancels the OK?
         self.current_guess += self._step
         self._dial_touched = True
 
     def press_down(self, mono: float) -> None:
-        if self.phase != "entry" or self._debounced(mono):
+        if self.phase not in ("rules", "entry") or self._debounced(mono):
+            return
+        if self.phase == "rules":
+            self._toggle_rule()
             return
         self.confirming = False              # dialing cancels the OK?
         self.current_guess = max(0, self.current_guess - self._step)
         self._dial_touched = True
 
     def press_lock(self, mono: float) -> None:
-        if self.phase != "entry" or self._debounced(mono):
+        if self.phase not in ("rules", "entry") or self._debounced(mono):
+            return
+        if self.phase == "rules":            # rule confirmed: guessing begins
+            self.phase = "entry"
             return
         if not self.confirming:              # first press only ASKS
             self.confirming = True
@@ -91,6 +104,8 @@ class GuessGame:
             self.__init__(step_ft=self._step, players=self.players,
                           rule=self.rule, debounce_s=self._debounce_s)
             return
+        if self.phase == "rules" and view.st is not None and view.st != 0:
+            self.phase = "watching"          # it flew mid-menu: no game this round
         if self.phase == "entry" and view.st is not None and view.st != 0:
             if self._dial_touched and len(self.guesses) < len(self.players):
                 self.guesses.append(self.current_guess)   # a dialed kid still played

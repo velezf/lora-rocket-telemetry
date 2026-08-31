@@ -58,3 +58,19 @@ def test_reveal_shows_the_winner():
     g_empty = GuessGame()
     g_empty.on_view(reveal_view)
     assert render(reveal_view, game=g_empty).tobytes() == without.tobytes()
+
+
+def test_confirm_screen_differs_from_dialing():
+    g_dial = GuessGame()
+    g_ok = GuessGame()
+    g_ok.press_lock(mono=1.0)             # sitting at "Bacon 300 OK?"
+    assert g_ok.confirming
+    v = V()
+    assert render(v, game=g_dial).tobytes() != render(v, game=g_ok).tobytes()
+
+
+def test_rssi_still_rendered_during_entry():
+    g = GuessGame()
+    with_rssi = render(V(rssi_dbm=-50.0), game=g)
+    without = render(V(rssi_dbm=None), game=g)
+    assert with_rssi.tobytes() != without.tobytes()   # moved, not dropped

@@ -13,6 +13,9 @@ KID-TWEAKABLE KNOBS (Epic 8.5 — change these, restart the service):
 Phases: "entry" (on the pad, dialing) -> "watching" (flight; betting window
 closed at liftoff or when every seat is taken) -> "reveal" (apogee: the
 actual peak and whose guess came closest — ties go to the earlier kid).
+Locking is a TWO-press affair: #12 shows "<name> <guess> OK?" and only a
+second #12 banks it — dialing during the OK? cancels back to adjusting.
+(Field feedback 2026-08-31: one-press lock was guaranteed kid-fumble.)
 A dialed-but-never-locked guess banks automatically at liftoff: a kid who
 dialed 350 and got distracted by the countdown still played.
 """
@@ -41,6 +44,7 @@ class GuessGame:
         self.guesses: list[int] = []         # locked, in PLAYERS order
         self.winner: tuple[str, int] | None = None   # (player name, guess)
         self.peak_ft: int | None = None
+        self.confirming = False
         self._dial_touched = False
 
     @property
@@ -57,18 +61,24 @@ class GuessGame:
     def press_up(self, mono: float) -> None:
         if self.phase != "entry" or self._debounced(mono):
             return
+        self.confirming = False              # dialing cancels the OK?
         self.current_guess += self._step
         self._dial_touched = True
 
     def press_down(self, mono: float) -> None:
         if self.phase != "entry" or self._debounced(mono):
             return
+        self.confirming = False              # dialing cancels the OK?
         self.current_guess = max(0, self.current_guess - self._step)
         self._dial_touched = True
 
     def press_lock(self, mono: float) -> None:
         if self.phase != "entry" or self._debounced(mono):
             return
+        if not self.confirming:              # first press only ASKS
+            self.confirming = True
+            return
+        self.confirming = False              # second press BANKS
         self.guesses.append(self.current_guess)
         self._dial_touched = False
         if len(self.guesses) >= len(self.players):
@@ -85,6 +95,7 @@ class GuessGame:
             if self._dial_touched and len(self.guesses) < len(self.players):
                 self.guesses.append(self.current_guess)   # a dialed kid still played
                 self._dial_touched = False
+            self.confirming = False
             self.phase = "watching"
         if (self.phase in ("entry", "watching") and view.apogee_reveal
                 and view.peak_ft is not None):

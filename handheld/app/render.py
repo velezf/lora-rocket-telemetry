@@ -26,8 +26,7 @@ def _game_dial_line(game) -> str | None:
     if game.armed:
         return f"LOCKED x{len(game.guesses)} #12=play"
     if game.phase == "rules":
-        pick = "Closest" if game.rule == "closest" else "NoOver"
-        return f"GAME? {pick}"
+        return f"GAME? {game.menu_label}"
     if game.phase == "entry":
         if game.confirming:
             return f"{game.entering_name} {game.current_guess} OK?"
@@ -41,17 +40,20 @@ def _render_lab(game) -> Image.Image:
     img = Image.new("1", (WIDTH, HEIGHT), 0)
     d = ImageDraw.Draw(img)
     if game.phase == "rocket":
+        # name TOP-RIGHT in line with the label (field fix 2026-08-31: at
+        # y10 the big font ran down into the mass line)
         name, mass_g, diam_mm = game.rocket_row
         d.text((0, 0), "ROCKET?", font=_SMALL, fill=1)
-        d.text((0, 10), name, font=_HERO, fill=1)
-        d.text((0, 22), f"{mass_g}g", font=_SMALL, fill=1)
-        d.text((48, 22), f"{diam_mm}mm", font=_SMALL, fill=1)
+        d.text((WIDTH - d.textlength(name, font=_HERO), 0), name,
+               font=_HERO, fill=1)
+        d.text((0, 20), f"{mass_g}g", font=_SMALL, fill=1)
+        d.text((48, 20), f"{diam_mm}mm", font=_SMALL, fill=1)
     elif game.phase == "motor":
         code, impulse, avg_n, _, _ = game.motor_row
         d.text((0, 0), "MOTOR?", font=_SMALL, fill=1)
         d.text((0, 10), code, font=_HERO, fill=1)
-        d.text((48, 22), f"{impulse:g}Ns", font=_SMALL, fill=1)
-        d.text((96, 22), f"{avg_n:g}N", font=_SMALL, fill=1)
+        d.text((48, 20), f"{impulse:g}Ns", font=_SMALL, fill=1)
+        d.text((96, 20), f"{avg_n:g}N", font=_SMALL, fill=1)
     elif game.phase == "entry":
         d.text((0, 0), f"{game.rocket_row[0]} + {game.motor_row[0]}",
                font=_SMALL, fill=1)

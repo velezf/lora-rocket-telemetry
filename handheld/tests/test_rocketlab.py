@@ -183,3 +183,18 @@ def test_lab_reveal_lock_starts_another_round_while_waiting():
     assert g.phase == "rocket" and g.mode == "lab"
     g.on_view(V(st=1))                   # the real launch, three rounds deep
     assert g.guesses == [325]            # still the real guess
+
+
+def test_menu_displays_all_three_games_distinctly():
+    # regression (field 2026-08-31): the menu LOGIC had three games but the
+    # LABEL was derived from game.rule, so RocketLab displayed as a stale
+    # "NoOver" and looked missing from the list
+    from handheld.app.render import render
+
+    g = GuessGame()
+    v = V()
+    screens = []
+    for _ in range(3):
+        screens.append(render(v, game=g).tobytes())
+        g.press_up(mono=len(screens) * 1.0)
+    assert len(set(screens)) == 3        # Closest / NoOver / RocketLab all render

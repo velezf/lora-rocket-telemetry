@@ -128,5 +128,5 @@ leave it alone. (Trixie also dropped `dphys-swapfile`.)
 
 - **8.2** ✅ Receiver firmware — BUILT + on-air bench 2026-08-31 (see Status). Boot test WITNESSED same day: unattended power-on → idle page, service active at 0 min. AGL fix verified on the running bonnet (`-85ft` → `0ft`). Slice 6: battery % on the idle page (pisugar-server gauge).
 - **8.3** Multi-node — track `SRC:1` (rocket) + `SRC:2` (lander) on one screen *(waits on the Epic 7 lander)*
-- **8.4** Guess-the-apogee game — kids dial a guess on the buttons; apogee reveals the winner
-- **8.5** Kid-tweakable messages + rules
+- **8.4** ✅ Guess-the-apogee — BUILT 2026-08-31 (`app/game.py`): the screen prompts each kid **by name** (`Bacon? 350ft`), #5 up / #6 down / #12 lock-and-next-kid, liftoff closes betting (an unlocked dial still banks), the apogee screen names the winner (ties → earlier in the roster), and a sled power-cycle auto-resets the round for the next launch. Field test pending.
+- **8.5** Kid-tweakable messages + rules — the knobs (`PLAYERS`, `RULE`, `STEP_FT`, `START_FT`) sit at the top of `app/game.py` with instructions; edit + service restart. `RULE`: `"closest"` (absolute distance, default) or `"no-over"` (Price-Is-Right — busting loses; everyone busts, the rocket wins)

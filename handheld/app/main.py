@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ground.rx.sx127x import LoRaConfig
 
 from handheld.app.battery import read_battery_pct
+from handheld.app.game import GuessGame
 from handheld.app.loop import LoopCounters, battery_tick, render_tick, rx_step
 from handheld.app.oled import HeartbeatDisplay
 from handheld.app.rx import RxCounters, apply_settings
@@ -30,6 +31,21 @@ from handheld.app.viewmodel import HandheldModel
 
 RENDER_PERIOD_S = 1.0
 BATTERY_EVERY_TICKS = 30   # gauge poll cadence: every 30 render ticks (~30 s)
+BUTTON_POLL_S = 0.05       # 20 Hz — debounce itself is in game.py (pure)
+
+
+def build_buttons():
+    """The bonnet's three buttons (active-low, internal pull-ups): the pin
+    names ARE the silkscreen labels — #5 up, #6 down, #12 lock."""
+    import board
+    import digitalio
+
+    pins = {}
+    for name, pin in (("up", board.D5), ("down", board.D6), ("lock", board.D12)):
+        b = digitalio.DigitalInOut(pin)
+        b.switch_to_input(pull=digitalio.Pull.UP)
+        pins[name] = b
+    return pins
 
 
 def build_radio(cfg: LoRaConfig):
@@ -58,7 +74,9 @@ def main() -> int:
     cfg = LoRaConfig()
     radio = build_radio(cfg)
     display = build_display()
+    buttons = build_buttons()
     model = HandheldModel()
+    game = GuessGame()
     rx_counters, counters = RxCounters(), LoopCounters()
     stop = threading.Event()
 
@@ -67,12 +85,28 @@ def main() -> int:
         while not stop.is_set():
             if tick % BATTERY_EVERY_TICKS == 0:
                 battery_tick(model, read_battery_pct, time.monotonic(), counters)
-            render_tick(model, display, time.monotonic(), counters)
+            render_tick(model, display, time.monotonic(), counters, game)
             tick += 1
             stop.wait(RENDER_PERIOD_S)
 
+    def button_loop():
+        # dumb edge-poller: press = newly LOW (active-low); debounce is the
+        # game's job, so a held button fires once per edge, not per poll
+        was = {name: True for name in buttons}
+        actions = {"up": game.press_up, "down": game.press_down,
+                   "lock": game.press_lock}
+        while not stop.is_set():
+            for name, b in buttons.items():
+                now_high = b.value
+                if was[name] and not now_high:
+                    actions[name](time.monotonic())
+                was[name] = now_high
+            stop.wait(BUTTON_POLL_S)
+
     t = threading.Thread(target=render_loop, name="render", daemon=True)
     t.start()
+    bt = threading.Thread(target=button_loop, name="buttons", daemon=True)
+    bt.start()
 
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())

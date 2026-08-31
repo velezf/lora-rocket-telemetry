@@ -94,15 +94,24 @@ leave it alone. (Trixie also dropped `dphys-swapfile`.)
   `~/lora-rocket-telemetry` (deploys are `git pull`, per ADR 0002). Stop
   prints a counters line (`accepted/decode_errors/foreign_sys/rx_errors/`
   `render_errors`) — restart it to sample counters.
-- **PiSugar:** powers the board; USB power charges the battery but does
-  **not** boot the Pi — short-press the PiSugar button. Its I²C is dead
-  pending solder (see Status), so no battery/RTC/buttons yet.
-  `pisugar-server` is installed (web UI :8421, TCP 8423).
-- **USB-ethernet gadget staged, unverified:** `dwc2`/`g_ether` with pinned
-  MACs in `/boot/firmware/` (+ NM profile `usb-gadget`, link-local). A known
-  *data* micro-USB cable into the middle port ("USB", beside mini-HDMI)
-  should make `ssh apogee-handheld.local` work over the cable; every cable
-  tried so far was power-only.
+- **PiSugar:** board-to-board interface is DEAD both ways as of 2026-08-31 —
+  I²C absent (`0x57`/`0x68`) AND it no longer supplies power to the Pi; the
+  2026-08-31 solder attempt fixed neither. One suspect for both: pogo-pin/pad
+  contact (charge LEDs work, so the battery side is alive). The Zero runs on
+  USB meanwhile. Full PiSugar stack IS installed (`pisugar-server` +
+  `pisugar-poweroff` + `pisugar-programmer`, 2.3.2-1 — matches the Pi 5), and
+  the Pi 5's operational config was ported 2026-08-31 (wake-on-charge, RTC
+  sync, anti-mistouch, 5 %/30 s auto-shutdown, double-tap → clean poweroff,
+  soft_poweroff; backup `config.json.bak-20260831`) — armed, takes effect
+  when the bus lives. Web UI `http://apogee-handheld.local:8421`, user
+  `admin`; password is Frank's standard PiSugar one (secrets never in this
+  repo — same rule as the hotspot secret).
+- **USB-ethernet gadget VERIFIED 2026-08-31:** one data micro-USB cable from
+  the middle port ("USB", beside mini-HDMI) to the Mac supplies power AND a
+  link-local network — the Mac gets an interface at the pinned MAC and
+  `ssh apogee-handheld.local` works over the cable, router-free. PWR IN has
+  no data lines, ever. Diagnostic freebie: a Zero enumerating on the Mac as
+  `BCM2710 Boot` is powered fine but cannot find a bootable SD card.
 
 ## This folder
 
@@ -116,7 +125,7 @@ leave it alone. (Trixie also dropped `dphys-swapfile`.)
 
 ## Roadmap (Epic 8)
 
-- **8.2** ✅ Receiver firmware — BUILT + on-air bench 2026-08-31 (see Status). Boot-test open: first unattended power-on not yet observed.
+- **8.2** ✅ Receiver firmware — BUILT + on-air bench 2026-08-31 (see Status). Boot test WITNESSED same day: unattended power-on → idle page, service active at 0 min. AGL fix verified on the running bonnet (`-85ft` → `0ft`).
 - **8.3** Multi-node — track `SRC:1` (rocket) + `SRC:2` (lander) on one screen *(waits on the Epic 7 lander)*
 - **8.4** Guess-the-apogee game — kids dial a guess on the buttons; apogee reveals the winner
 - **8.5** Kid-tweakable messages + rules

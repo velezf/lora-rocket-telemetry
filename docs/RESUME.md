@@ -87,14 +87,20 @@ minutes — is the epic working as designed. Knobs (`PLAYERS`, `RULE`,
   is the field trial). **8.3 multi-node waits on the Epic 7 lander** — the
   only Epic 8 item left. Also still unobserved on this box: double-tap
   poweroff and wake-on-charge.
-- **"RocketLab" third game mode — AGREED 2026-08-31, next code work:** an
-  offline range-downtime quiz — pick a rocket (curated mass/diameter list)
-  and a motor (curated table with CERTIFIED impulse/avg thrust; the code
-  string is display only — an A8 really averages ~3 N), kids guess the
-  apogee, a deterministic 1-DOF sim is the single answer authority.
-  Constraints already decided: sim over catalog numbers (consistency beats
-  accuracy), small kid-extendable data tables, and A REAL LIFTOFF PREEMPTS
-  THE QUIZ — the toy never blocks the device's first job.
+- **"RocketLab" third game mode — BUILT AND DEPLOYED same day (2026-08-31),
+  side quest included** (commits `8948537` sim core, `dc0d72f` UI,
+  `1103103` side quest — cite them; kid-facing detail in
+  `handheld/README.md`). All the decided constraints held: the
+  deterministic 1-DOF sim is the single answer authority, the motor table
+  carries CERTIFIED numbers (the code string is display only), and A REAL
+  LIFTOFF PREEMPTS THE QUIZ — including from the armed side quest, where
+  the kids' real-flight guesses are stashed and restored intact for the
+  real reveal. **Calibration story worth keeping:** the sim's test against
+  the fleet's own measured flight (859 ft) CAUGHT an invented 120 g Katana
+  mass; the flight's physics said ~0.5 kg flying mass, Frank's scale
+  confirmed 432 g dry, and the sim now predicts within ~1 % — the
+  evidence-trust discipline reaching into a children's game. Sim bench
+  test with the kids: pending, alongside the field trial.
 
 ## FLIGHT DAY 2026-08-25 — F2/F3 FLOWN, CAPTURED, PUBLISHED (same day)
 

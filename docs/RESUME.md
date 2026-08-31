@@ -17,7 +17,7 @@ logic + lamp-sweep plan, the ingest heartbeat publisher, and the Pi supervisor s
 "Open branches". Still designed-not-built: `feat/oled-heartbeat` layout redesign — see Backlog. Still parked from 2026-07-08: the flights page mock on pages-repo branch
 `feat/flights-section` awaiting Frank's review→merge→push, then Claude tags `v1.0-portfolio-genesis`._
 
-## HANDOFF — 2026-08-31: EPIC 8 HANDHELD — 8.2 BUILT, ON-AIR VERIFIED, IN SERVICE
+## HANDOFF — 2026-08-31: EPIC 8 HANDHELD — BUILT, IN SERVICE, FAMILY-TESTED
 
 **The kids' handheld went from "platform groundwork" to a working, self-booting
 mission-control receiver in one session.** Five TDD slices (30 host tests), each
@@ -63,12 +63,38 @@ is therefore now LIVE, not armed: wake-on-charge, RTC sync, anti-mistouch,
 Double-tap gesture and wake-on-charge still await their first field-style
 observation on THIS box.
 
+**8.4 + 8.5 BUILT AND FAMILY-TESTED THE SAME DAY (2026-08-31), through
+THREE live UX rounds** — built, benched with Frank and the kids, fixed,
+redeployed, repeat; the per-round detail lives in the commits, cite them:
+`bb93910` (game: named roster Bacon/HnyBsct/Dragon, two rules, buttons),
+`1203034` (two-press confirm + dial owns the bottom row), `a1844c1`
+(startup game-select menu, labeled display, unclipped names), `9a5ea57`
+(the bounce-to-menu bug — reset fired on "St IS 0" instead of "St RETURNED
+to 0", yanking a locked-in game back to the menu on plain pad frames; plus
+the LOCKED-x3 armed screen and the #5+#6 start-over chord). **Final flow
+verified by the kids on the real bench, chord included:** game pick →
+each kid by name → two-press lock → armed until liftoff → LIFTOFF! →
+live AGL → apogee reveal naming the winner → sled power-cycle resets to
+the pick. That bench loop — build → family test → fix → redeploy in
+minutes — is the epic working as designed. Knobs (`PLAYERS`, `RULE`,
+`STEP_FT`, `START_FT`) top of `handheld/app/game.py`.
+
 **OPEN / PARKED, with owners:**
 - **The Pi 5's pisugar web UI has NO AUTH** (`:8421` open on the LAN — the
   Zero has auth, the reference box doesn't). **Frank HOLDS on changing it**;
   recorded so the gap is a named fact, not a surprise.
-- **8.4 guess-the-apogee is the next code work** (buttons D5/D6/D12 idle);
-  **8.3 multi-node waits on the Epic 7 lander.**
+- **First real-flight run of the game** (bench-tested only; next launch day
+  is the field trial). **8.3 multi-node waits on the Epic 7 lander** — the
+  only Epic 8 item left. Also still unobserved on this box: double-tap
+  poweroff and wake-on-charge.
+- **"RocketLab" third game mode — AGREED 2026-08-31, next code work:** an
+  offline range-downtime quiz — pick a rocket (curated mass/diameter list)
+  and a motor (curated table with CERTIFIED impulse/avg thrust; the code
+  string is display only — an A8 really averages ~3 N), kids guess the
+  apogee, a deterministic 1-DOF sim is the single answer authority.
+  Constraints already decided: sim over catalog numbers (consistency beats
+  accuracy), small kid-extendable data tables, and A REAL LIFTOFF PREEMPTS
+  THE QUIZ — the toy never blocks the device's first job.
 
 ## FLIGHT DAY 2026-08-25 — F2/F3 FLOWN, CAPTURED, PUBLISHED (same day)
 
@@ -977,7 +1003,7 @@ method below. |
 | 5 — TEENSY 4.1 SLED RESPIN (onboard fusion + SD recorder) | 🟡 **PLANNED — [`docs/epic5-teensy-respin.md`](epic5-teensy-respin.md)**; closed question (attitude is onboard or not live) + arithmetic in "EPIC 5 RE-SCOPED" above. Gated on F2 flying first. 5.1 hardware evidence done (LSM6DSOX 0x6a + LIS3MDL 0x1c; WHO_AM_I 0x6C/0x3D); raw channels reach the wire via the E+F pad frame (ADR 0005 A1.3). `Roll`/`Spin` stay reserved (ADR 0001 App. A). |
 | 6 — Relay deployment (safety-critical) | ⏳ Not started. |
 | 7 — Lander payload (`SRC:2`) | ⏳ Not started. Tag names reserved (ADR 0001 Appendix A). |
-| 8 — Kids' handheld | 🟢 **8.2 BUILT + ON-AIR BENCH-VERIFIED 2026-08-31** (see the 2026-08-31 handoff at top; ops facts in `handheld/README.md`). 8.1 closed except the PiSugar I²C solder fix (parked, physical). 8.3 waits on Epic 7; 8.4–8.5 not started. |
+| 8 — Kids' handheld | ✅ **EFFECTIVELY DONE 2026-08-31** short of 8.3 and a launch day (see the 2026-08-31 handoff; ops facts in `handheld/README.md`). 8.1 ✅ (PiSugar pogo interface fixed by solder, verified live); 8.2 ✅ on-air + boot-tested, AGL-correct, battery on the idle page; 8.4+8.5 ✅ guess-the-apogee **family-tested through three live UX rounds**. Remaining: 8.3 multi-node (waits on Epic 7), field trial at the next launch. |
 
 ## Open branches (pending review/merge)
 

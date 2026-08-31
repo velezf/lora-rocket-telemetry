@@ -22,6 +22,9 @@ dialed 350 and got distracted by the countdown still played.
 """
 from __future__ import annotations
 
+from handheld.app.rockets import MOTORS, ROCKETS
+from handheld.app.rocketsim import apogee_ft
+
 PLAYERS = ("Bacon", "HnyBsct", "Dragon")
 RULE = "closest"
 STEP_FT = 25
@@ -40,7 +43,12 @@ class GuessGame:
         self._debounce_s = debounce_s
         self._last_press: float | None = None
 
-        self.phase = "rules"                 # rules | entry | watching | reveal
+        # rules | rocket | motor | entry | watching | reveal
+        self.phase = "rules"
+        self.mode = "live"                   # live (radio) | lab (offline sim)
+        self._menu_i = 0 if rule == "closest" else 1
+        self._rocket_i = 0
+        self._motor_i = 0
         self.current_guess = start_ft
         self.guesses: list[int] = []         # locked, in PLAYERS order
         self.winner: tuple[str, int] | None = None   # (player name, guess)
@@ -52,6 +60,20 @@ class GuessGame:
     @property
     def entering_name(self) -> str:
         return self.players[len(self.guesses)]
+
+    _MENU = (("closest", "Closest"), ("no-over", "NoOver"), ("lab", "RocketLab"))
+
+    @property
+    def menu_label(self) -> str:
+        return self._MENU[self._menu_i][1]
+
+    @property
+    def rocket_row(self):
+        return ROCKETS[self._rocket_i]
+
+    @property
+    def motor_row(self):
+        return MOTORS[self._motor_i]
 
     @property
     def armed(self) -> bool:
@@ -70,33 +92,51 @@ class GuessGame:
         self._last_press = mono
         return False
 
-    def _toggle_rule(self) -> None:
-        self.rule = "no-over" if self.rule == "closest" else "closest"
+    def _dial_menu(self, step: int) -> None:
+        if self.phase == "rules":
+            self._menu_i = (self._menu_i + step) % len(self._MENU)
+            key = self._MENU[self._menu_i][0]
+            if key != "lab":
+                self.rule = key              # live picks double as the rule
+        elif self.phase == "rocket":
+            self._rocket_i = (self._rocket_i + step) % len(ROCKETS)
+        elif self.phase == "motor":
+            self._motor_i = (self._motor_i + step) % len(MOTORS)
 
     def press_up(self, mono: float) -> None:
-        if self.phase not in ("rules", "entry") or self._debounced(mono):
+        if self.phase not in ("rules", "rocket", "motor", "entry") or self._debounced(mono):
             return
-        if self.phase == "rules":
-            self._toggle_rule()
+        if self.phase != "entry":
+            self._dial_menu(+1)
             return
         self.confirming = False              # dialing cancels the OK?
         self.current_guess += self._step
         self._dial_touched = True
 
     def press_down(self, mono: float) -> None:
-        if self.phase not in ("rules", "entry") or self._debounced(mono):
+        if self.phase not in ("rules", "rocket", "motor", "entry") or self._debounced(mono):
             return
-        if self.phase == "rules":
-            self._toggle_rule()
+        if self.phase != "entry":
+            self._dial_menu(-1)
             return
         self.confirming = False              # dialing cancels the OK?
         self.current_guess = max(0, self.current_guess - self._step)
         self._dial_touched = True
 
     def press_lock(self, mono: float) -> None:
-        if self.phase not in ("rules", "entry") or self._debounced(mono):
+        if self.phase not in ("rules", "rocket", "motor", "entry") or self._debounced(mono):
             return
-        if self.phase == "rules":            # rule confirmed: guessing begins
+        if self.phase == "rules":            # game confirmed
+            if self._MENU[self._menu_i][0] == "lab":
+                self.mode = "lab"
+                self.phase = "rocket"
+            else:
+                self.phase = "entry"
+            return
+        if self.phase == "rocket":
+            self.phase = "motor"
+            return
+        if self.phase == "motor":
             self.phase = "entry"
             return
         if not self.confirming:              # first press only ASKS
@@ -106,12 +146,31 @@ class GuessGame:
         self.guesses.append(self.current_guess)
         self._dial_touched = False
         if len(self.guesses) >= len(self.players):
-            self.phase = "watching"
+            if self.mode == "lab":
+                self._lab_reveal()           # the sim answers NOW: no launch
+            else:
+                self.phase = "watching"
+
+    def _lab_reveal(self) -> None:
+        peak = apogee_ft(self.rocket_row, self.motor_row)
+        self.peak_ft = peak
+        if self.guesses:
+            i = min(range(len(self.guesses)),
+                    key=lambda i: abs(self.guesses[i] - peak))
+            self.winner = (self.players[i], self.guesses[i])
+        self.phase = "reveal"
 
     # -- flight-driven transitions ------------------------------------------
     def on_view(self, view) -> None:
         if view.st is not None and view.st != 0:
             self._seen_flight = True
+            if self.mode == "lab":
+                # A REAL LIFTOFF PREEMPTS THE QUIZ (decided 2026-08-31):
+                # discard the lab round; the flight owns the screen
+                self.mode = "live"
+                self.phase = "watching"
+                self.guesses = []
+                self.confirming = False
         # St RETURNED to 0 after a flight = next launch: fresh round. The
         # transition matters: plain pad frames must NOT reset a locked-in
         # game awaiting launch (family bench 2026-08-31 — it bounced kids

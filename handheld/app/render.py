@@ -23,6 +23,8 @@ def _game_dial_line(game) -> str | None:
     """The rules/entry overlay text, or None when the game has none."""
     if game is None:
         return None
+    if game.armed:
+        return f"LOCKED x{len(game.guesses)} - fly!"
     if game.phase == "rules":
         pick = "Closest" if game.rule == "closest" else "NoOver"
         return f"GAME? {pick}"

@@ -92,3 +92,15 @@ def test_rules_screen_shows_and_toggles():
     assert closest.tobytes() != noover.tobytes()
     confirmed = game()                    # past the menu: entry screen
     assert render(v, game=confirmed).tobytes() != closest.tobytes()
+
+
+def test_armed_screen_acknowledges_locked_guesses():
+    g = game(players=("Bacon", "Dragon"))
+    g.press_lock(mono=1.0); g.press_lock(mono=2.0)   # Bacon in
+    g.press_lock(mono=3.0); g.press_lock(mono=4.0)   # Dragon in -> armed
+    assert g.armed
+    v = V()
+    armed = render(v, game=g)
+    assert armed.tobytes() != render(v).tobytes()     # not the plain pad page
+    g2 = game(players=("Bacon", "Dragon"))            # menu vs armed differ too
+    assert armed.tobytes() != render(v, game=g2).tobytes()

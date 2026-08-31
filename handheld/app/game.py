@@ -47,10 +47,21 @@ class GuessGame:
         self.peak_ft: int | None = None
         self.confirming = False
         self._dial_touched = False
+        self._seen_flight = False
 
     @property
     def entering_name(self) -> str:
         return self.players[len(self.guesses)]
+
+    @property
+    def armed(self) -> bool:
+        """All guesses banked, rocket still on the pad — awaiting launch."""
+        return self.phase == "watching" and not self._seen_flight
+
+    def reset(self) -> None:
+        """Start over (the #5+#6 chord, or the sled's next-flight St cycle)."""
+        self.__init__(step_ft=self._step, players=self.players,
+                      rule=self.rule, debounce_s=self._debounce_s)
 
     # -- buttons ------------------------------------------------------------
     def _debounced(self, mono: float) -> bool:
@@ -99,10 +110,15 @@ class GuessGame:
 
     # -- flight-driven transitions ------------------------------------------
     def on_view(self, view) -> None:
-        # St back on the pad after a flight = next launch: fresh round
-        if self.phase in ("watching", "reveal") and view.st == 0:
-            self.__init__(step_ft=self._step, players=self.players,
-                          rule=self.rule, debounce_s=self._debounce_s)
+        if view.st is not None and view.st != 0:
+            self._seen_flight = True
+        # St RETURNED to 0 after a flight = next launch: fresh round. The
+        # transition matters: plain pad frames must NOT reset a locked-in
+        # game awaiting launch (family bench 2026-08-31 — it bounced kids
+        # back to the menu the moment they finished locking in).
+        if (self.phase in ("watching", "reveal") and view.st == 0
+                and self._seen_flight):
+            self.reset()
             return
         if self.phase == "rules" and view.st is not None and view.st != 0:
             self.phase = "watching"          # it flew mid-menu: no game this round

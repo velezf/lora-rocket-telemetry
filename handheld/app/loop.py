@@ -18,6 +18,16 @@ from handheld.app.rx import handle_payload
 class LoopCounters:
     render_errors: int = 0
     rx_errors: int = 0
+    battery_errors: int = 0
+
+
+def battery_tick(model, reader, mono: float, counters) -> None:
+    """Poll the gauge once (reader: () -> int|None). Never raises — a dead
+    pisugar-server must not touch telemetry or the display."""
+    try:
+        model.set_battery(reader(), mono)
+    except Exception:
+        counters.battery_errors += 1
 
 
 def rx_step(radio, model, mono: float, rx_counters, counters) -> None:

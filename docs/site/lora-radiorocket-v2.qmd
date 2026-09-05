@@ -1,0 +1,303 @@
+---
+title: "LoRa RadioRocket V2"
+description: "Second-generation rocket telemetry: a Raspberry Pi 5 ground station that receives LoRa natively in Python, a versioned packet contract shared by every node, 10 Hz flight-rate telemetry with onboard velocity and G envelopes, a fail-closed LED panel beside a status OLED, and a flight archive that publishes itself. Two Katana Jr flights recorded at under 1 % packet loss."
+date: "2026-09-05"
+categories: [IoT, telemetry, LoRa, hardware, amateur radio, Raspberry Pi, Python, embedded]
+image: ../images/lora-radiorocket-v2.jpg
+---
+
+## Overview
+
+[Version 1](lora-radiorocket.qmd) proved that a Feather M0 in a rocket could stream altitude and G-force to a LePotato on the ground at 1 Hz. It worked on its first flight, and it also taught me what a link is not: it is not a record. The V1 string was unversioned, a second receiver could not be added without copying code, the ground side depended on Node-RED flows I could not test, and a whole flight was about twenty data points.
+
+V2 kept the sled and rebuilt everything around it. The ground station is now a Raspberry Pi 5 that receives LoRa **natively** through a driver I wrote in Python, so there is no RX firmware at all. The packet format is a written, versioned contract that a C encoder on the sled and a Python decoder on the ground both test against. The sled samples at 20 Hz and transmits at 10 Hz in flight. Every flight lands in an append-only session log, is derived into a permalinked record, and appears on the [flight archive](lora-flights.qmd) the same evening. A separate [kids' handheld](apogee-handheld.qmd) listens to the same broadcast.
+
+This page is the V2 write-up. The V1 page and the flight archive stay as they are.
+
+::: {.callout-note}
+## Status, 2026-09-05
+Flown and recording. Two Katana Jr flights on 2026-08-25 produced the first real 10 Hz flight records (859 ft and 749 ft AGL, 0.31 % and 0.54 % packet loss). The handheld is built and family-tested. Still ahead: a Teensy 4.1 sled respin with onboard attitude fusion and an SD flight recorder, the deployable lander payload, and a launch-day trial of the handheld game.
+:::
+
+📡 **[Flight archive →](lora-flights.qmd)** — every record, with AGL altitude, link quality, and full 10 Hz traces.
+
+## What changed from V1
+
+| | V1 (2025) | V2 (2026) |
+|---|---|---|
+| Ground computer | Libre LePotato + a second Feather M0 as RX | Raspberry Pi 5 (8 GB), radio on the Pi's own SPI bus |
+| Receiver code | Arduino RX firmware, serial to Node-RED | Python SX127x driver over `spidev` + `lgpio`, host-tested against a fake SPI |
+| Packet format | Ad hoc string with emoji and a space-bearing battery status | Versioned `KEY:VALUE` ASCII contract (ADR 0001), additive tags, tolerant decoders |
+| Telemetry rate | 1 Hz, sampled and transmitted in the same loop | 20 Hz sampling; 1 Hz on the pad, 10 Hz in flight (ADR 0005) |
+| Radio | 434 MHz, BW 125 kHz, 23 dBm | 434 MHz, SF7 / BW 500 kHz / CR 4:5, 17 dBm |
+| Fields | ALT, Max, G, Pg, T, Batt, state | Same, plus SEQ, MET, onboard `Vel`, G envelope `Gmx`/`Gmn`, spin envelope `Wmx`, 9-DoF pad frames, `CALL` beacons |
+| Flight record | Whatever the dashboard showed | Append-only JSONL session log, derived flights index, published CSV per flight |
+| Status at the pad | Laptop dashboard | Six-LED panel (own process, fail-closed), 128×64 OLED, phone dashboard over hotspot |
+| Clock | Whatever the SBC booted with | PiSugar RTC restore at boot and a fail-closed clock gate before any session opens |
+| Testing | Flash and see | Host-side TDD for every piece of logic: 88 native firmware tests, 400 ground tests, 83 handheld tests |
+| Other receivers | None | Kids' handheld on a Pi Zero 2 W, importing the ground decoder unchanged |
+
+The APRS digipeater side of the V1 box (RTL-SDR + Direwolf) carried over into the V2 enclosure, but it is not part of this telemetry system and I have left it out of this write-up.
+
+## System architecture
+
+```{mermaid}
+%%| fig-cap: "One transmitter, many listeners. The sled is the only C++ in the project; everything on the ground is Python."
+flowchart LR
+  subgraph rocket["Rocket sled — SRC:1"]
+    FW["Feather M0 + RFM96<br/>BMP390 · ADXL375 · 9-DoF<br/>20 Hz sample · 1/10 Hz TX"]
+  end
+  FW -- "434 MHz LoRa<br/>V:1 KEY:VALUE frames" --> RX
+  FW -. broadcast .-> HH["Kids' handheld<br/>Pi Zero 2 W + bonnet"]
+  subgraph gs["Ground station — apogee-gs (Pi 5)"]
+    RX["sx127x driver<br/>spidev + lgpio"] --> ING["apogee-ingest<br/>decode · link stats · flight detect"]
+    ING --> LOG["session JSONL<br/>append-only"]
+    ING --> DASH["Flask dashboard<br/>phone hotspot"]
+    ING --> OLED["128×64 OLED<br/>what the flight is doing"]
+    ING -- heartbeat --> PANEL["apogee-panel<br/>6 LEDs · is the system working"]
+  end
+  LOG --> FLT["flights CLI<br/>segment · derive AGL · export"]
+  FLT --> WEB["flights.json + CSV<br/>velezf.github.io"]
+```
+
+The shape that matters is on the right: one process owns the radio and fans decoded observations out to consumers, and time is injected into that observation once. No consumer reads a clock. Three files are written by three different writers, never shared: the session log by the service, an ops journal by the CLI, and the flights index by pure derivation from the other two. Rebuilding the index from the same inputs produces byte-identical output, which is what lets me trust a number on the archive page months later.
+
+## The packet contract
+
+The single most useful decision in V2 was writing the wire format down before touching either end. [ADR 0001](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0001-packet-format-v1.md) defines a v1 packet as space-delimited ASCII tokens, each a `KEY:VALUE` pair, the first always `V:1`:
+
+```
+V:1 SYS:7 SRC:1 SEQ:42 St:1 ALT:1234ft Max:5678ft G:2.3 Pg:9.1 T:21.5C Batt:3.92V MET:12
+```
+
+That exact string is a golden vector. The C encoder on the sled and the Python decoder on the ground each carry a unit test that asserts against it, so the two implementations can only drift by failing a test. The rules that make it evolvable:
+
+- **Keyed, not positional.** A decoder keys on tag names, ignores tags it does not know, and tolerates absent ones. A missing tag is valid, not an error.
+- **Additive changes do not bump the version.** `Vel`, `Gmx`, `Gmn`, `Wmx` and the 9-DoF pad-frame channels were all added within v1 without touching any deployed receiver.
+- **Only breaking changes bump `V`.** Renaming a tag, changing its units, or changing the grammar. A decoder that sees an unknown version must reject the packet and count it, never best-effort parse.
+- **Addressing rides in the payload.** `SYS` is the network, `SRC` the vehicle (1 sled, 2 lander). Because they are in the string and not in a radio header, the contract is transport-agnostic.
+- **Integrity is the LoRa PHY CRC.** No application checksum in v1; the driver drops and counts CRC failures before the decoder ever sees them.
+
+ASCII costs airtime. A 139-byte frame carries about fifteen numbers that would pack into thirty bytes, a tax of roughly four times. I kept it deliberately: every defect I have found in this project so far was found by reading a session log or a serial console with my eyes, and a binary format would take that away. It is recorded as the next lever if I ever need more than about 17 packets per second, since bandwidth is exhausted at BW 500.
+
+## The sled: sample fast, transmit slow
+
+![The V2 sled board set before assembly: Feather M0 RFM96 with the quarter-wave wire antenna, BMP390 barometer, ADXL375 high-G accelerometer (±200 g), LSM6DSOX + LIS3MDL 9-DoF, and a 350 mAh LiPo.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/v2-sled-boards.jpg)
+
+The V1 firmware sampled and transmitted in the same loop, gated by a one-second delay. The consequence showed up on the first V2 bench test: a hand-swung sled produced a 2.2 g jerk that fell between samples and never tripped launch detection. The detectors were only as fast as the radio.
+
+V2 splits them. The loop samples the barometer and accelerometers on a 50 ms tick and transmits on a separate schedule. A failed barometer read now skips that one sample instead of returning from the whole loop and costing a packet. The firmware measures and prints its own achieved sample rate every five seconds, because the BMP390's throughput at a given oversampling is a property to measure, not to assume. It first came in at 17 Hz; the missing time turned out to be the radio library busy-waiting on the previous transmission, not the barometer, and making the transmit non-blocking brought it to 20 Hz.
+
+### Confirmed apogee, and the harness that measured it
+
+The V1 apogee detector declared apogee on the first sample that was not higher than the running max, and latched. One noisy sample during boost could set the descent state for the rest of the flight, and every subsequent packet would carry a wrong flight state that no ground-side processing could recover, because the truth was never transmitted.
+
+V2's detector requires 20 ft of hysteresis below the running max **and** 300 ms of continuous dwell, with both constants in time rather than sample counts so a slower achieved rate degrades precision instead of silently redefining the criterion. To size it I built a synthetic flight profile with an analytic ground truth and a harness that runs any detector at any sample rate. It immediately corrected a threefold arithmetic error in my own plan: confirmed-apogee latency costs 77.9 ft of altitude at 1 Hz and 33.8 ft at 20 Hz, not the 257 and 27 I had estimated, and most of the benefit is already won by 5 Hz.
+
+### Why 10 Hz needed a bandwidth change
+
+A whole flight of this class is about twenty seconds. At 1 Hz that is twenty points, enough to say a flight happened, not enough to plot it. The target that drove [ADR 0005](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0005-telemetry-rate-and-rf-configuration.md) was an OpenRocket-style plot: altitude, vertical velocity and acceleration against time, with event markers.
+
+Three LoRa parameters set throughput. The coding rate was already minimal. SF6 would have required implicit-header fixed-length packets, which fights the variable-length tolerant format at the mechanism level. That left bandwidth:
+
+| Bandwidth | Time on air, 139 B | Duty at 10 Hz | Sensitivity |
+|---|---|---|---|
+| 125 kHz (V1) | 235.8 ms | 236 %, impossible | −123 dBm |
+| 250 kHz | 117.9 ms | 118 %, impossible | −120 dBm |
+| **500 kHz** | **58.9 ms** | **58.9 %** | **−117 dBm** |
+
+At the V1 bandwidth 10 Hz was not expensive, it was unreachable. Going to 500 kHz costs 6 dB of sensitivity, and whether the link could afford that is the question the next section is about. TX power dropped from 23 to 17 dBm as part of the same decision, because at 59 % duty the transmitter is keyed more than half the time and heat becomes the binding constraint.
+
+Transmit rate is state-dependent: 1 Hz on the pad, 10 Hz from confirmed launch for a 300 s window bounded by mission elapsed time, then back to a 1 Hz recovery beacon. The window is bounded by MET because nothing else bounds it; without a landed state code, "fast while airborne" would key the transmitter until the battery died in the grass.
+
+### What rides on the wire now
+
+Three fields were added within v1 for the plot, and the reasoning behind each is in the link-budget section below: `Vel`, vertical velocity computed on board at the sample rate; `Gmx` and `Gmn`, the acceleration envelope across each transmit window; and `Wmx`, the same window mechanism over gyro magnitude so spin cannot alias however fast the airframe rolls.
+
+Frame shape follows flight state: pad frames carry the raw 9-DoF channels at 1 Hz as a calibration dataset, flight frames carry the envelopes. Every transmitter also beacons its callsign (KC3ZTQ) at start, at least every 9.5 minutes, and at shutdown, per Part 97. Beacons are counted separately and never participate in flight accounting: a landed rocket beaconing every minute must not hold a flight open.
+
+## Learning link budgets, and what they decided
+
+I came into V2 without ever having done a link budget. V1 worked, so I had never needed one. V2 forced the question three separate times, and each time the arithmetic ended up choosing a design I would not have picked by intuition. This section is the elementary version, written the way I worked it out.
+
+### The arithmetic
+
+A link budget is bookkeeping in decibels. Start with what the transmitter puts out, subtract what the path takes away, and compare what is left against the weakest signal the receiver can still decode. Free-space path loss for a distance *d* in kilometres at frequency *f* in megahertz is
+
+$$\text{FSPL} = 32.44 + 20\log_{10}(f) + 20\log_{10}(d)$$
+
+For 434 MHz and a worst-case slant range of 1.5 km, which is generous for the flights this system flies:
+
+```
+FSPL   = 32.44 + 20·log10(434) + 20·log10(1.5) = 88.7 dB
+RX     = 17 dBm − 88.7 dB                        = −71.7 dBm   (0 dBi antennas both ends)
+margin = −71.7 − (−117)                          = 45.3 dB
+```
+
+Subtract 2 to 3 dB for connectors and cable and call it 42 dB. The number that gave me confidence was not the clear-air figure but what it leaves for fading: a tumbling airframe sweeps its antenna pattern through deep nulls, and 20 to 30 dB fades are ordinary. A 42 dB margin absorbs a 30 dB fade with room left.
+
+The −117 dBm in that sum is the receiver's sensitivity, and this is where bandwidth entered. LoRa sensitivity gets 3 dB worse every time bandwidth doubles, because the receiver is integrating noise over twice the spectrum. 125 kHz gives −123 dBm, 500 kHz gives −117 dBm. So the 10 Hz decision was really the sentence "I am spending 6 dB of my 48 dB on time", and the budget said I could.
+
+Two other pieces of the picture were new to me. Duty cycle is not a regulatory limit under Part 97, so it shows up as a thermal constraint on the transmitter, which is why TX power dropped to 17 dBm as part of the same decision. And the 500 kHz channel centred on 434.0 MHz occupies 433.75 to 434.25 MHz, inside the 70 cm amateur allocation, where amateur is secondary and the band is shared with a great deal of 433 MHz ISM traffic. That is a noise-floor consideration, not a legality one, and it is the argument for keeping margin rather than spending all of it.
+
+### The antenna I did not know was missing
+
+The budget is a design assumption until something measures it, and the first measurement said the design was fiction. Bench RSSI at a few feet had been sitting around −80 dBm when the recorded bench band for that geometry was −38 to −14 dBm. Somewhere between 42 and 66 dB of the budget was simply not there. The receive chain had a re-soldered u.FL connector and a damaged bulkhead pigtail, and until they were fixed every weak-signal symptom was the connector until proven otherwise. After the repair, close-range RSSI came back to −40 ±1 dBm with zero loss and a standard deviation of 0.38 dB over 45 packets, 2 dB shy of the bench band and attributed to the insertion loss of the new connector chain.
+
+Only a flight could measure the rest. On 2026-08-25 the worst in-flight RSSI was −101 dBm at about 860 ft, against −117 dBm sensitivity: 16 dB of real margin at the worst moment of the flight, fades included, at less than a fifth of the range the budget was sized for. That number replaced the design assumption in the ADR, and the packet loss it came with was 0.31 %.
+
+### What good ADXL375 data needed
+
+The high-G accelerometer is the sled's launch detector and its only view of boost, and V1 was wasting it. The first V2 bench test made that concrete: a hand swing produced a 2.2 g jerk that fell between two 1 Hz samples and never tripped the 3 g launch threshold. The sensor saw it; the loop did not.
+
+The link budget decided how this got fixed, because every option cost bytes on the wire, and bytes are airtime, and airtime is the thing the budget had just priced.
+
+- **Sample fast, transmit slow.** Decoupling the sample tick from the transmit tick cost nothing in airtime, so it came first. The ADXL375 is now read every 50 ms regardless of when the radio next keys up.
+- **Send the envelope, not the sample.** Even at 10 Hz, an instantaneous reading misses a spike that lasts 20 ms, and the plotted amplitude would depend on which phase of the boost the sample happened to land in. The fix is to compute the minimum and maximum acceleration magnitude across each transmit window on board and send both, reset only when a frame actually goes to air, so a skipped transmission widens the window rather than losing the spike. That makes spike amplitudes exact at any transmit rate, which decouples the accelerometer's correctness from the rate decision entirely.
+- **Budget the bytes.** Those two tags plus onboard velocity took the worst-case frame from 109 to 141 bytes, which is why the airtime table above is computed at 139 and why the decision is 58.9 % duty rather than 45 %. An earlier increment that tried to send the three raw axes found the firmware's message buffer was 128 bytes against a 143-byte worst case, and that truncation was silent: a frame cut short decoded as a valid packet with a plausible wrong value. Both the buffer and the encoder were fixed so overflow is loud, and the per-axis tags were parked because the envelope answers the question they were asked for.
+- **What not to send.** Splitting slow-changing tags across alternate packets would have saved about 13 % of airtime and made "absent" indistinguishable from "unchanged" for every consumer. The budget had already bought enough headroom that the complexity had nothing to purchase.
+
+The principle that fell out, and that the next subsection extends, is to derive where the data is dense and transmit the derivative. Velocity is computed on board at 20 Hz because differentiating 10 Hz altitude on the ground amplifies the barometer's quantisation into noise. The G envelope is computed on board for the same reason.
+
+### Why attitude pushed me to a Teensy
+
+The 9-DoF sensors are on the sled, and the obvious plan was to stream their raw gyro and accelerometer values and fuse them into an attitude on the Pi. The link budget closed that door in one afternoon of arithmetic.
+
+Fusion needs raw samples at 50 Hz or more. At SF7 and 500 kHz, ASCII raw frames at 50 Hz come to 352 % duty. A minimal 20-byte binary frame per sample is 77 %, over the 65 % line I had set for thermal reasons. A realistic 34-byte binary frame is 103 %, over the radio's ceiling itself. Batching five samples into a 10 Hz binary packet does fit, at about 32 % duty, so duty alone does not close the question. Two other legs do. Batching requires a binary v2 format, the largest contract change the system could make. And the load-bearing one: attitude is an integration, and integrating over a lossy radio link means every tumble fade punches a hole in the input and the solution diverges during exactly the dynamics it exists to capture. Onboard integration has a loss-free input by construction. No transport fixes that.
+
+So attitude is computed on board or it does not exist live. That put the question to the Feather M0, a 48 MHz Cortex-M0+ with no floating-point unit: could it run a Mahony filter at 100 Hz in software floats alongside everything it already does? I never had to measure it. The Teensy 4.1 was already on hand, and its 600 MHz Cortex-M7 with an FPU makes the question moot, while its built-in microSD slot becomes the full-rate flight recorder for the one product the radio can never carry, spin spectra from the IMU FIFO at 833 Hz. The plan runs the core down to 150 MHz, which roughly quarters the MCU's draw; in flight the radio at 17 dBm and 59 % duty dominates the power budget anyway, so the clock is a pad-endurance knob rather than a flight one.
+
+The port cost was measured before deciding. Every firmware unit in `lib/` has zero board includes, so the detectors, encoder, conversions and the profile harness move without edits along with their native tests. The entire port surface is the one hardware glue file, and the two things that do not carry over are the Feather's hardwired radio pins and its battery-sense divider, which is board wiring and would silently produce plausible wrong volts if forgotten.
+
+Sequencing was firm: the 10 Hz build flew on the Feather first. Stacking an unflown MCU port on an unflown RF rewrite would have meant failures that could not be attributed to either.
+
+
+## The ground station
+
+![Inside the V2 box, lid off. The Pi 5 sits under a proto-board carrier; the RFM96W breakout on its SPI bus feeds the left bulkhead SMA through a u.FL pigtail. The RTL-SDR on the right serves the APRS digipeater. The 1.3" OLED is taped in for the bench.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/v2-gs-interior.jpg)
+
+| Component | Role |
+|---|---|
+| Raspberry Pi 5 (8 GB), Pi OS 64-bit Trixie | Runs the ingest service, dashboard, OLED and panel supervisor |
+| RFM96W breakout on SPI0, CE1 | Native LoRa receive; DIO0 deliberately unwired, the driver polls |
+| Adafruit 1.3" SSD1306 128×64 OLED on I²C | Flight display |
+| Six front-panel LEDs on GPIO | System-health panel, driven by its own process |
+| PiSugar 3 Plus UPS, 5000 mAh | Battery, real-time clock, graceful shutdown, wake-on-charge |
+| 12 V → 5 V buck into the PiSugar charge port | Field power from a vehicle or pack |
+| Blue metal project box, run lid-off | Airflow over passive heatsinks and no shielding of the Pi's Wi-Fi |
+
+::: {layout-ncol=2}
+![The PiSugar 3 Plus mounts under the Pi on pogo pins. Both the Pi 5 and the Zero needed a bit of solder on the pogo pads before the I²C interface showed up.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/v2-gs-pisugar.jpg)
+
+![Front panel: the SCE-to-AUX switch carried over from V1, and the six-LED row. Blue, blue, red, green, green, green, left to right.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/v2-gs-front-panel.jpg)
+:::
+
+### Native receive, no RX firmware
+
+The plan called for Adafruit's `rfm9x` library on Blinka. On the Pi 5 that fell apart: `RPi.GPIO` maps BCM283x registers directly and does not run on the Pi 5's RP1, and Blinka's build pulled in dependencies that would not compile in an isolated venv. Rather than shim it, I wrote a small SX127x driver over raw `spidev` and `lgpio` ([ADR 0002](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0002-ground-rx-driver-spidev.md)). It mirrors the sled's RadioHead modem configuration, enforces the CRC, strips the four-byte RadioHead header, and hands validated payload bytes to the decoder. The SPI transport is injected, so register and frame logic run on my Mac against a fake SPI with no hardware.
+
+The whole ground stack ended up Blinka-free: OLED via `luma.oled`, LEDs via `lgpio`, radio via `spidev`. The radio is receive-only by construction, not by convention: the driver defines only sleep, standby and continuous-receive modes, and no transmit or power-amplifier register is ever written. That is what makes it safe to power the box without an antenna while a pigtail is on order. The sled has the opposite rule and never runs without one.
+
+### The clock problem
+
+Every session and record is timestamped from the system clock at the moment the radio owner sees the frame. On 2026-07-13 the box booted with a mis-dated session, and the chain was instructive. The Pi 5's onboard RTC has no coin cell, so the kernel came up in 1970. The time-sync daemon then advanced the clock to its saved floor, the last shutdown time. Nothing had read the PiSugar's battery-backed RTC, which was correct. My old gate checked that the year was at least 2024, the stale floor passed it, and a session opened four days in the past. Wi-Fi fixed it that time; offline at a launch site it would have been a silently corrupt record.
+
+[ADR 0003](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0003-rtc-boot-restore-clock-gate.md) fixed it in two coupled parts. A oneshot unit reads the PiSugar RTC before ingest starts and sets the system clock only when it is bogus or grossly behind, never stepping backward, and drops a trust marker. The ingest service then refuses to start unless the clock is NTP-synced or that marker exists. A plausible year alone no longer passes. For the case of a dead RTC and no network there is an operator escape hatch: set the clock from a phone and attest it. Silence and duration inside the service use monotonic deltas, so a later clock step cannot distort a flight's length. The whole thing was verified on a cold boot with Wi-Fi off.
+
+### Two surfaces, not peers
+
+The box has two displays and they answer different questions. The LED panel answers "is the system working". The OLED answers "what is the flight doing". The distinction is structural. The panel supervisor is its own process that reads a heartbeat file the ingest service publishes; when ingest dies the heartbeat goes stale and the supervisor drives the red LED, fail-closed. The OLED's render thread lives inside ingest, so when that process dies the display freezes showing plausible content and cannot report its own death.
+
+| Position | Colour | Name | Meaning |
+|---|---|---|---|
+| 1 | blue | RF | RF trouble: foreign traffic or climbing CRC errors *(designed, not yet wired end-to-end)* |
+| 2 | blue | CLOCK | Clock provenance: solid when restored from the RTC |
+| 3 | red | NOT RECORDING | Solid when ingest is down or the clock gate refused; fast blink at low battery; slow pulse while shutting down |
+| 4 | green | FLIGHT | Solid while a flight is open |
+| 5 | green | RX | Fast blink on fresh packets |
+| 6 | green | ALIVE | 1 Hz heartbeat, never solid, so a frozen supervisor shows as a stuck LED rather than a healthy one |
+
+The operator rule that follows: when the two surfaces disagree, believe the LEDs. A dark RX LED under a plausible altitude on the OLED means ingest is dead and the screen is showing the past.
+
+Mapping those six positions was its own lesson. The harness is cross-wired, so physical order is not GPIO order. My first map, taken from watching a lamp sweep, was reversed in every position and stood wrong for three weeks. Lighting one LED at a time and counting its position was the only reliable method, and the map now lives as data in one Python module where a host test enforces that the GPIO table, the colour table and the lamp-test order agree.
+
+### The OLED
+
+The V1 box had no display. The first V2 OLED rendered straight off each decoded packet, which meant a quiet pad drew nothing and looked exactly like a dead box. The redesign moved rendering onto its own thread off a view-model snapshot, gave the pad an idle page, and put a spinning liveness glyph in the corner that proves the render thread is turning. The hero digits are hand-drawn 28-pixel bitmaps approved outdoors on the real panel before golden-image tests froze them, because a golden preserves whatever it was generated from, mistakes included.
+
+::: {layout-ncol=2}
+![Idle: no sled heard yet. Clock provenance shows here and only here, where the operator can cross-check it against the CLOCK LED.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/gs-oled-idle.png)
+
+![Pad: the sled is up, baseline locking, altitude zeroed AGL.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/gs-oled-pad.png)
+
+![Live ascent. Callsign in the header because Part 97 gives it a regulatory reason to be legible.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/gs-oled-live.png)
+
+![Stale: silence during ascent is abnormal, so the state band says so and shows the age. Silence on the pad is normal and does not alarm.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/gs-oled-stale.png)
+
+![Summary: holds the peak until the next flight opens, because this is what I read walking downrange with the box in hand.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/gs-oled-summary.png)
+
+![Overflow policy: above 9,999 ft the hero switches units rather than shrinking or clipping, and truncates rather than rounds so it can never overstate altitude.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/gs-oled-overflow.png)
+:::
+
+*Screens above are rendered by the ground station's own drawing code, not mocked up.*
+
+![The OLED on the bench during the redesign, showing an earlier layout with the 1834 ft test value.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/v2-gs-oled-bench.jpg)
+
+### Dashboard and power
+
+A small Flask app inside the ingest service serves a phone-sized dashboard over the Pi's Wi-Fi, which joins my phone's hotspot at the range: per-vehicle flight badge and packet age, T+ since launch, AGL altitude, an RSSI sparkline and an events feed. It is a convenience path, not a data path. If the hotspot fails at the pad, capture, the panel and the OLED are all unaffected, which is why I was willing to close that item without ever observing an unattended cold-boot rejoin.
+
+The PiSugar governs power both ways. Auto-shutdown at 5 % after 30 s, and a double-tap on its button runs an orderly shutdown so the append-only session log closes with a clean final record; a raw power cut can truncate the last line. Wake-on-charge fires on the rising edge of external power being connected, not on power being present, so a box powered off with the charger plugged in stays off. That rising-edge semantic is the fact I most expect to have forgotten in six months, which is why it is written next to the config.
+
+## From session log to web page
+
+The flight archive is derived, never hand-edited. The ingest service writes one JSONL record per packet plus advisory events (flight open, flight close, service start and stop). A flights CLI segments a session into flights, derives each one, and exports a `flights.json` summary plus a per-flight CSV of raw packets, which the Quarto archive page reads directly.
+
+The derivation that matters most is the **AGL baseline**. Raw barometric altitude at my bench reads about −85 ft. The baseline is a stability-gated trailing window over pad packets that locks the instant launch is detected, and both the baseline and the number of samples it used are stored with every flight so any AGL figure on the archive can be re-derived. The same pure function runs live on the ground station, on the handheld, and offline in the derivation, so the three never disagree about zero.
+
+The first record in the archive, 2026-07-08-F1, is a bench shake test: a hand-swung sled tripped launch detection and ran the whole pipeline end to end, with a 10 ft "peak" that is barometric noise. Its real over-the-air bytes are now a version-controlled golden fixture that every contract change has to reproduce exactly.
+
+## Flight day 2026-08-25
+
+Two Katana Jr flights on F15-6 motors at Izaak Walton Field, the first real 10 Hz flight records this system has produced. Both were on the archive page that evening.
+
+| Flight | Peak AGL | Packets | Loss | RSSI range | Max velocity | Max spin | Boost peak |
+|---|---|---|---|---|---|---|---|
+| 2026-08-25-F1 | 859 ft | 3,222 | 0.31 % | −100 to −57 dBm | 201 ft/s | 1,177 dps | 10.4 g |
+| 2026-08-25-F2 | 749 ft | 366 | 0.54 % | −97 to −69 dBm | — | 2,299 dps | — |
+
+F1's record is long because the sled beaconed from the recovery grass for nine minutes before I reached it. F2 landed in an RF shadow at grass level and went quiet for 2.4 minutes after touchdown, which is the predicted recovery-beacon physics rather than flight loss. F2's spin peak sits at the gyro's full-scale limit, so the true rate is at least that.
+
+The flights found three bugs, all fixed the same evening. Wall-clock timestamps on the Pi invert by about 33 ms on a 20-second cadence, and the derivation was manufacturing packet loss from the reordering; it now honours arrival order. Publishing overwrote the archive instead of merging into it, which would have erased July's genesis record. And the publisher emitted a different schema than the page expected, so the new entries rendered as NaN until the page's schema was pinned as the contract.
+
+Three post-mortem items are still open with their evidence recorded and causes not chased: the box hard power-cut during pack-up at 95 % battery with no shutdown record, wake-on-charge did not fire on shore power at home, and the timestamp inversion itself is a Pi clock-discipline question whose durable fix is to record a monotonic time per packet.
+
+## What I learned
+
+**Write the contract first.** Everything downstream of ADR 0001 was cheap because both ends of the wire had a golden vector to fail against. When a newlib-nano printf quirk made every float tag encode empty on the real board, the end-to-end check caught it even though every host test passed.
+
+**Test logic on the host, glue on the hardware.** The firmware's detectors, encoder, conversions and schedule are pure C++ with no Arduino includes and run natively on the Mac. The ground driver, decoder, derivation, OLED spec and LED policy are pure Python with time and transport injected. The Pi and the Feather only ever run thin shells. This is what made the sample-rate and apogee-latency numbers measurable before anything flew.
+
+**State a fact once and cite it.** On one day I found the clock escape-hatch procedure in four places, the LED order contradicting itself within a single document, and a state-file path wrong in two places while the constant was right. The convention now is that literal values live at one authority and everything else links to it.
+
+**Ask whether a check could have failed.** A test pipeline whose exit status was `tail`'s, a process check that matched its own command line, and a kill command that terminated the SSH session holding the pattern all happened in one day. Each reported success without verifying anything. The question to ask of any guard is not "did it pass" but "could this have failed".
+
+**A designed-but-inert signal is worse than an absent one.** The RF LED cannot fire today because nothing publishes the counters it reads. That is recorded in one canonical table in the repo, and nothing may be described as panel-covered until it comes off that list.
+
+**Don't stack two revolutions without a flight between them.** The Teensy 4.1 sled respin was decided in August, but sequenced firmly after the 10 Hz build flew on the Feather. A failure on an unflown RF rewrite and an unflown MCU port at the same time could not be attributed to either.
+
+## What's next
+
+- **Epic 5, Teensy 4.1 sled respin.** Onboard Mahony fusion streaming a 10 Hz attitude, and the microSD flight recorder for spin spectra as a post-recovery product. The reasoning is in the link-budget section; the plan, port-cost audit and SD record design are written and waiting on hardware.
+- **Epic 7, the lander.** A KB2040 with a BME680 and APDS9960 as `SRC:2`, separating at main and radioing its own atmosphere and light data home on the same grammar. The tag names are already reserved.
+- **Open hardening.** Wire the RF LED and the write-failure leg of the red LED; record monotonic time per packet; chase the hard power-cut.
+- **The [handheld](apogee-handheld.qmd) at a real launch.** Family-tested on the bench, not yet flown.
+
+## Links
+
+- [GitHub repository](https://github.com/velezf/lora-rocket-telemetry)
+- [Flight archive](lora-flights.qmd) and [V1 write-up](lora-radiorocket.qmd)
+- [Kids' handheld](apogee-handheld.qmd)
+- Decision records: [0001 packet format](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0001-packet-format-v1.md) · [0002 native RX driver](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0002-ground-rx-driver-spidev.md) · [0003 clock integrity](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0003-rtc-boot-restore-clock-gate.md) · [0005 rate and RF](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0005-telemetry-rate-and-rf-configuration.md)
+- [Sled firmware](https://github.com/velezf/lora-rocket-telemetry/tree/main/firmware) · [Ground service](https://github.com/velezf/lora-rocket-telemetry/tree/main/ground) · [Field checklist](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/field-checklist.md)
+- Original concept: [N3VEM's RadioRocketV2](https://github.com/N3VEM/RadioRocketV2)

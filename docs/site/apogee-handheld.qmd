@@ -1,0 +1,125 @@
+---
+title: "Apogee Handheld"
+description: "A mission-control receiver the kids can hold: a Pi Zero 2 W and a LoRa bonnet that listen to the rocket's 434 MHz broadcast, shout LIFTOFF! on a 128×32 OLED, reveal apogee, score a guess-the-apogee game, and run an offline RocketLab simulator calibrated to the fleet's real flight."
+date: "2026-09-05"
+categories: [LoRa, Raspberry Pi, Python, hardware, rocketry, kids, education]
+image: ../images/apogee-handheld.jpg
+---
+
+## Overview
+
+The [V2 ground station](lora-radiorocket-v2.qmd) records flights. This is the thing that gets the kids leaning in. It is a receive-only node on the same 434 MHz LoRa broadcast, built from a Raspberry Pi Zero 2 W, Adafruit's RFM96W radio bonnet with its small OLED and three buttons, and a PiSugar 3 battery. It listens to every packet the rocket sends, shows live altitude above the pad, flashes an inverted LIFTOFF! banner the moment the flight state changes, and holds the apogee on screen until the next flight.
+
+Then there is the game. Before launch each kid dials in a guess for how high the rocket will go, locks it with two presses, and the screen arms itself until liftoff. At apogee it names the winner. While everyone waits at the range there is a third mode, RocketLab, where they pick a rocket and a motor from a table and a small physics simulation referees their guesses instead of a real flight.
+
+::: {.callout-note}
+## Status, 2026-09-05
+Built, on the air, and family-tested through three live bench rounds on 2026-08-31. Not yet flown: the next launch day is the field trial. Multi-vehicle display waits on the lander payload.
+:::
+
+![The three screens a kid sees most: armed on the pad, the liftoff banner, and the apogee reveal. Rendered by the handheld's own drawing code.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/card-apogee-handheld.jpg)
+
+## Hardware
+
+| Part | Role | Notes |
+|---|---|---|
+| Raspberry Pi Zero 2 W | Compute | Pi OS Lite 64-bit, headless, runs one systemd service |
+| Adafruit LoRa Radio Bonnet, RFM96W | 434 MHz receive on SPI | The 433-band variant covers 434 MHz; CS on CE1, reset on GPIO 25 |
+| Bonnet SSD1306 OLED, 128×32 | Display | I²C `0x3C`; small, but it is what the bonnet carries |
+| Bonnet buttons, three | Game input | #5 up, #6 down, #12 lock; the silkscreen labels are the pin names |
+| PiSugar 3 | Battery, gauge, RTC, safe shutdown | Pogo-pin contact needed a second solder pass before its I²C appeared |
+| BaoFeng SRH805S | Antenna | SMA-female, so the bonnet pigtail has to present SMA-male |
+
+Two build gotchas cost real time. The bonnet uses the Pi's second SPI chip-select, and the default SPI overlay claims that pin for the kernel, so the radio failed to initialise with a "GPIO busy" error until a one-chip-select overlay freed it. And the PiSugar's spring-loaded pogo pins did not make contact with the Zero's pads on the first try: it powered the board while its battery gauge and real-time clock were absent from the I²C bus. Solder on the pads fixed it, the same fix the Pi 5 ground station needed.
+
+The Zero's middle micro-USB port doubles as a USB-ethernet gadget, so one data cable to my laptop supplies power and a link-local network with no router involved. That turned out to be the most convenient way to work on it at the bench.
+
+## Software
+
+The handheld runs in under a thousand lines of Python and copies nothing from the ground station. It imports the ground decoder, the LoRa configuration and the pad-baseline function directly from the repository checkout it runs from. That was a deliberate decision recorded as its own ADR: a second copy of the bandwidth constant alone would be disqualifying, because a bandwidth mismatch between the sled and a receiver is silent, total link loss with no error to read.
+
+The structure mirrors the ground station's display. A pure view-model takes decoded frames plus an injected clock and produces an immutable snapshot. A pure renderer turns a snapshot into a 128×32 one-bit image. A thin loop owns the radio, and the display and the buttons each get their own thread. Each thread counts its own failures instead of raising, so a display fault never stops reception and a radio fault never kills the screen. The service prints those counters when it stops; the healthy shape on the bench read 56 frames accepted with zeros everywhere else.
+
+All of the logic is host-tested on my Mac with no hardware: 83 tests cover the view-model, the renderer, the game state machine, the simulator and the battery gauge. The screens on this page were produced by running that renderer, not by mocking anything up.
+
+### Altitude above the pad
+
+The first live display read −85 ft on the pad. That is raw barometric altitude at my bench, plus the sled's rule that its running-max field stays at zero until a flight starts. The fix was to reuse the ground station's pad-baseline function unchanged: a stability-gated rolling zero while the rocket sits on the pad, frozen the instant liftoff is observed, and a raw fallback for a handheld powered on mid-flight that has no pad history to zero from. After the fix the same bonnet read 0 ft, and the archive, the ground OLED and the handheld all agree about what zero means.
+
+## The screens
+
+### Live flight
+
+::: {layout-ncol=2}
+![Idle: no frame heard yet. A quiet pad has to look alive, which was a defect on the ground station once. The battery percentage comes from the PiSugar's gauge.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-idle.png)
+
+![Startup game pick: Closest, NoOver, or RocketLab. Up and down toggle, lock confirms.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-menu.png)
+
+![Entry, on the pad: each kid is prompted by name, and the dial owns the bottom row. RSSI sits top-right with its units.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-entry.png)
+
+![Confirm: the first lock press asks, the second banks it. Dialing during the question cancels.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-confirm.png)
+
+![Armed: every guess locked, awaiting launch. Lock from here opens the RocketLab side quest; the up-plus-down chord starts over.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-armed.png)
+
+![LIFTOFF: an inverted full-screen banner for three seconds after the observed state change. A handheld switched on mid-flight never sees it.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-liftoff.png)
+
+![Live: altitude above the pad as the hero number, peak and state word below.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-live.png)
+
+![Apogee reveal: peak as the hero, current altitude top-right, held until the sled power-cycles for the next flight. With a game running the winner's name and guess appear on the right.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-reveal.png)
+:::
+
+### RocketLab
+
+::: {layout-ncol=2}
+![Pick a rocket. The name is the hero; dry mass and body diameter sit below because they are inputs the sim actually uses.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-lab-rocket.png)
+
+![Pick a motor: code, certified total impulse and average thrust. The code lies a little; an A8 averages about 3 N.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-lab-motor.png)
+
+![Lab entry: the chosen pair on top, the same two-press dial per kid below. No altitude or signal readout anywhere in lab mode, because there is no rocket.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-lab-entry.png)
+
+![The verdict. The simulator is the single answer authority; another lock press starts another round.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/hh-lab-reveal.png)
+:::
+
+## The game
+
+| Press | Menus | Dialing a guess | Armed or reveal |
+|---|---|---|---|
+| #5 up | next option | +25 ft, cancels a pending OK? | ignored |
+| #6 down | previous option | −25 ft, floor 0, cancels OK? | ignored |
+| #12 lock | confirm | first press asks, second banks it and seats the next kid | armed: open RocketLab; lab reveal: another round |
+| #5 + #6 chord | start over | start over | leave a side quest with the real guesses intact, or start over from plain armed |
+
+Two rules are on offer. *Closest* is smallest absolute distance from the actual peak. *No-over* is Price-Is-Right: closest without going over, and if everyone busts, nobody wins and the rocket does. Ties go to whoever is earlier in the roster.
+
+The flight drives the transitions, not a timer. Betting closes the moment a non-pad state arrives, and a kid who dialed a number but got distracted by the countdown still has it banked automatically. If the rocket flies while the menu is still up, the screen goes straight to watching and there is no game that round. A real liftoff during a RocketLab round preempts the quiz: the lab round is discarded, and the real-flight guesses that were stashed when the side quest opened come back for the real reveal. The sled power-cycling on the pad after a flight resets everything to the game pick.
+
+The names, the rule, the step size, the starting value and the rocket and motor tables all sit at the top of two Python files with comments, so the kids can edit them. Change a name, restart the service, and the screen prompts the new name.
+
+### RocketLab and the calibration story
+
+The simulator is deliberately simple: one-dimensional vertical flight, average thrust over the certified burn time, linear propellant burn-off, quadratic drag on the body's frontal area, 5 ms steps. It is a consistent referee for a guessing game, not a range-safety tool. Consistency beats accuracy here.
+
+It still had to be honest. The test I wrote for it used the fleet's own Katana Jr, which the ground station had recorded at 859 ft on an F15 two weeks earlier, and the first version of the rocket table gave the Katana an invented mass of 120 g. The sim predicted a number nowhere near the flight. The flight's own physics said otherwise: a peak vertical velocity of 201 ft/s against the F15's impulse implies roughly half a kilogram of flying mass. I put the rocket on a scale with the sled aboard: 432 g dry. With the measured mass the sim predicts within about one percent of the recorded apogee. That is the same discipline the rest of the project runs on, evidence over assumption, reaching into a children's game.
+
+## What the family bench taught
+
+The receiver went from groundwork to a working service in one session, and the game was built and tested with the kids the same day through three rounds of build, bench, fix, redeploy. Each round changed something I would not have guessed at a desk:
+
+- **One-press lock was guaranteed kid-fumble.** Lock became two presses with a question in between, and dialing during the question cancels.
+- **Everything needs a label.** An unlabeled RSSI read as a floating mystery number, and on the bottom row it collided with the dial. It moved top-right with its units; the hero number got an ALT label; the bottom row lifted clear of the screen edge.
+- **Reset on the transition, not on the state.** The first version reset the game whenever a pad frame arrived. That yanked a fully locked-in game back to the menu the moment the kids finished, because pad frames arrive every second. Reset now fires only when the state returns to pad after a flight has been seen.
+- **The waiting room earns its keep.** Real launches involve a lot of standing around. RocketLab exists so the handheld is interesting between flights, and the side-quest design came from watching that wait.
+
+## Open items
+
+- **First real flight.** Bench-tested only, including the sim. The next launch day is the trial.
+- **Reveal layout.** With a game running, the winner line and the state word share the bottom row and overlap. Found while rendering the screens for this page; the reveal shown above is the no-game layout.
+- **Multi-vehicle display.** Rocket and lander on one screen waits on the lander existing.
+- **Power behaviours unobserved on this box.** Double-tap poweroff and wake-on-charge are configured but have not yet been exercised in the field.
+- **Boot-time clock.** The Zero has no onboard RTC either, so the ground station's RTC-restore unit should be replicated here.
+
+## Links
+
+- [Handheld source and README](https://github.com/velezf/lora-rocket-telemetry/tree/main/handheld)
+- [Why this platform](https://github.com/velezf/lora-rocket-telemetry/blob/main/handheld/docs/adr/0001-handheld-receiver-platform.md) · [Why it imports the ground modules](https://github.com/velezf/lora-rocket-telemetry/blob/main/handheld/docs/adr/0002-receiver-reuses-ground-modules.md)
+- [LoRa RadioRocket V2](lora-radiorocket-v2.qmd) · [Flight archive](lora-flights.qmd)

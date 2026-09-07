@@ -194,6 +194,24 @@ Sequencing was firm: the 10 Hz build flew on the Feather first. Stacking an unfl
 ![Front panel: the SCE-to-AUX switch carried over from V1, and the six-LED row. Blue, blue, red, green, green, green, left to right.](https://raw.githubusercontent.com/velezf/lora-rocket-telemetry/main/docs/site/images/v2-gs-front-panel.jpg)
 :::
 
+### SCE to AUX
+
+Somewhere along the way I learned about the steely-eyed missile man, the compliment NASA flight controllers pay to someone who makes the right call under pressure because they did the homework nobody asked for. The original was John Aaron on Apollo 12: lightning hit the Saturn V thirty-six seconds after liftoff, Mission Control's telemetry turned to nonsense, and Aaron recognised the pattern from an anomaly he had chased on his own a year earlier. His call, "SCE to AUX," meant nothing to the flight director, the CapCom or the commander, but Alan Bean knew where the switch was, flipped it, and the data came back. I loved that story the moment I read it, and I still do.
+
+So when this project got going and needed a ground station, I went looking for that switch. The one on the front panel is a replica of the Apollo command module's SCE switch, guard and all, and it came over from the V1 box unchanged.
+
+What it does today is turn the box on. The toggle is the ground station's power switch: NORM is off, AUX is on, so every session at the range starts with the same call Houston made. It is not connected to any GPIO, and the panel supervisor does not know it exists.
+
+**A possible future direction** is to give it the job the original had, restoring telemetry rather than powering the box. The ground station has exactly the Apollo 12 failure mode: a wedged receive radio while the sled keeps flying and transmitting, and today the recovery is an SSH command, which is not something to type at the pad with cold hands. The design we would follow, if it happens:
+
+- **Move power elsewhere first.** The PiSugar's own button already does a graceful double-tap shutdown, so it can take over power and free the toggle for signalling.
+- **The panel supervisor owns the input**, not ingest. It is the process that survives the fault being recovered from; ingest cannot restart itself when it is the thing that is stuck.
+- **Edge-triggered, one action.** NORM to AUX resets the SX127x, restarts capture and runs the lamp sweep so the recovery is visible. AUX sitting there does nothing more; flipping back to NORM re-arms it.
+- **It writes itself into the record.** A session-log event marks the flip, so a recovery mid-capture shows as operator intervention rather than unexplained silence. If nothing was wrong, the flip costs one journal line and nothing else.
+- **Inert until proven.** Until it is wired and bench-verified it goes on the designed-but-inert register, since a labelled recovery switch that does nothing is worse than a blank panel.
+
+That would get its own decision record, with this story in the section that explains why.
+
 ### Native receive, no RX firmware
 
 The plan called for Adafruit's `rfm9x` library on Blinka. On the Pi 5 that fell apart: `RPi.GPIO` maps BCM283x registers directly and does not run on the Pi 5's RP1, and Blinka's build pulled in dependencies that would not compile in an isolated venv. Rather than shim it, we wrote a small SX127x driver over raw `spidev` and `lgpio` ([ADR 0002](https://github.com/velezf/lora-rocket-telemetry/blob/main/docs/adr/0002-ground-rx-driver-spidev.md)). It mirrors the sled's RadioHead modem configuration, enforces the CRC, strips the four-byte RadioHead header, and hands validated payload bytes to the decoder. The SPI transport is injected, so register and frame logic run on the Mac against a fake SPI with no hardware.

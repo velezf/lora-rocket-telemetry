@@ -59,10 +59,11 @@ paraphrase them.** What is specific to this repo:
   the concrete trigger that would revive it.
 - **Park or close every stream by name in `docs/RESUME.md`.** The global lifecycle rule applies;
   the reason it is load-bearing here: *parallel branches are how 34 stale branches accumulated.*
-- **Hook status: `.claude/hooks/verify-cwd.sh` is COMMITTED BUT NOT WIRED.** It is inert until
-  registered as a `PreToolUse` hook in settings. Recorded here rather than left implicit,
-  because a guard that exists but does not run is exactly the designed-but-inert hazard this
-  project already tracks for panel signals. Convention first; wire the hook **if it recurs**.
+- **Hook status: `.claude/hooks/verify-cwd.sh` is WIRED** (2026-09-25, `17befe6`) as a `PreToolUse`
+  Bash hook in `.claude/settings.json`, which extracts the command from the hook JSON with `jq`
+  first. Two dead paths were found and fixed when wiring: the raw-stdin regex never matched JSON
+  input, and the chained-push guard sat after the anchor early-exit. It inspects command TEXT, not
+  the process cwd: a discipline enforcer, not a sandbox. Pipe-test any change with real JSON.
 - **Consequence that must stay visible:** an earlier "PROBE CONFIRMED RUNNING (pgrep-verified)"
   may itself have been a self-match. **So the daylight glyph verification rests on a check that
   may have been hollow**, which is a second, independent reason that item stays OPEN, on top of

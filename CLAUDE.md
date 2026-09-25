@@ -9,14 +9,12 @@ live status (current epic, open branches, next steps). Keep it current as work l
 
 ## Working agreement (most important)
 
-- **Frank reviews and approves every commit and merge himself.** Default to working on
-  a feature branch and **STOP before committing** unless told otherwise. **Never merge
-  or push without explicit approval** — merging/pushing publishes to a public origin.
+Approval gates, TDD, commit format and the parallel-agent protocol are global:
+`~/.claude/CLAUDE.md`. Cross-project conventions (cite-don't-restate, the hollow-check
+failure class, shared Pi hardware, repo hygiene) are in `~/code/CLAUDE.md`. Cite those by
+section name; do not restate them. Repo-specific:
+
 - **One branch per unit of work**, per-task commits (mirror the existing history).
-- **TDD: red → green → refactor** for all logic. Write the failing test first.
-- **Commit messages:** conventional prefixes (`feat`/`test`/`docs`/`chore`) with a
-  scope, e.g. `feat(firmware): …`. End every commit with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
 - **Git over SSH.** Origin: `git@github.com:velezf/lora-rocket-telemetry`.
 
 ## Repo layout
@@ -39,143 +37,41 @@ version; only breaking changes to existing tags bump `V`).
 
 ## Cite, don't restate (doc convention)
 
-**Literal values get stated ONCE, at their authority, and are cited everywhere else** — paths,
-GPIO pins, I²C addresses, ports, thresholds. Write `` the path is `STATE_PATH` in
-`ground/panel/heartbeat.py` `` rather than pasting the path into prose. A fact stated once
-cannot contradict itself; a fact stated four times drifts and is caught only by a human
-happening to notice.
+The convention is `~/code/CLAUDE.md` "Cite, don't restate"; the 2026-07-31 incident that
+motivated it happened in this repo. Authorities for literal values here: the packet format is
+ADR 0001; the clock escape hatch is ADR 0003; heartbeat state path is `STATE_PATH` in
+`ground/panel/heartbeat.py`; deploy and service paths are the `systemd/` unit files.
 
-This is not theoretical: on 2026-07-31 three separate instances surfaced in one session — the
-clock escape-hatch procedure across four locations, the panel LED L→R order contradicting
-itself *within* `RESUME.md`, and the heartbeat state path wrong in two places while the
-constant was right. Same discipline ADR 0003 already applies to the escape hatch.
+## Parallel agents — repo-specific rules
 
-For **prose procedures** (as opposed to literal values), the tool is the same convention, not a
-test: one canonical copy, everything else links to it. No test can judge whether two prose
-procedures mean the same thing.
+The protocol is the `parallel-agents` skill plus `~/.claude/CLAUDE.md` "Parallel agents";
+the hollow-check failure class and Pi exclusivity are in `~/code/CLAUDE.md`. Adopted here
+2026-08-02, first day of parallel work. **Agent prompts CITE those by name; they must not
+paraphrase them.** What is specific to this repo:
 
-## Parallel agents — the canonical rules (cite this, don't restate it)
-
-Adopted 2026-08-02, first day of parallel work. **Agent prompts CITE this section by name;
-they must not paraphrase it** — same discipline as ADR 0003 and the deploy path.
-
-### Rules that constrain AGENTS
-
-1. **The Pi is exclusive, by construction.** Only the main thread touches hardware. Agents get
-   tasks that need none, so exclusivity never depends on an announce/release protocol holding
-   under pressure. *(A probe stopping `apogee-ingest` is why this can't be implicit.)*
-2. **Own branch/worktree; no two streams touch the same file.** Held on day one.
-3. **Agents COMMIT to their own branch. They never merge, never push, never tag, never touch
-   `main`.** The gate is MERGE AND PUSH, not commit — which fully preserves the intent ("no agent
-   lands work on `main` without approval") while fixing four things the original wording broke:
-   - **Uncommitted work cannot be reviewed with normal tools.** "Read the agent's diff" had no
-     diff to read; `git merge` on a branch with zero commits is a silent no-op.
-   - **It cannot be parked under rule 7** — a stream that ends the session uncommitted evaporates.
-   - **It is destroyed by a stray checkout**, which nearly happened on 2026-08-02.
-   - **A commit has a hash**, so claims about it can be verified — which is what this project's
-     whole verification discipline turns on.
-   **COROLLARY — merging an agent's branch ALWAYS requires a main-thread commit first.** The
-   agent commits to its own branch; the main thread reviews that commit, then merges. There is no
-   path where agent work reaches `main` without a human-gated merge, and no path where it reaches
-   `main` uncommitted. *(Discovered the hard way: `git merge` on a zero-commit branch is a SILENT
-   no-op — it reports success and changes nothing.)*
-   *(Second rule to need correcting. The first was rule 10.)*
-4. **No exploring new ideas inline.** Anything noticed goes to the stream's scratch file with the
-   concrete trigger that would revive it.
-5. **Each stream reports independently**, so reviews happen separately rather than as one blob.
-6. **No agent writes `docs/RESUME.md`.** Per-stream scratch files, folded in serially by the main
-   thread. *(RESUME is the most contended file in the repo; every stream wants to append backlog.)*
-7. **A stream that doesn't reach a gate in-session is explicitly parked or closed**, named in
-   RESUME with its state. *(Parallel branches are how 34 stale branches accumulated.)*
-8. **An agent's report is only valid relative to its BASE COMMIT, and it must say so up front.**
-   Agents branch from `main`, not the working branch, so anything committed only on a feature
-   branch is invisible to them. *(An agent reported "X appears nowhere in RESUME" — true in its
-   worktree, false in the repo. Scope must arrive attached to the claim.)*
-
-### Rules that constrain the MAIN thread
-
-9. **`.claude/worktrees/` is gitignored — scoped to `worktrees/` only**, never all of `.claude/`,
-   which may later hold tracked agent definitions or settings.
-10. **NEVER rely on inherited working directory. `cd` to the absolute repo root before any repo
-    command.** The Bash tool persists cwd between calls, so a single earlier `cd` into a worktree
-    silently relocates every subsequent "my repo" command — and **git will answer honestly about a
-    tree you didn't mean to be in.** *(This produced six tool calls of wrong conclusions and an
-    alarming, entirely false report of an agent isolation failure. Isolation had held.)*
-    Convention first; a `PreToolUse` hook only **if it recurs** — a hook firing on every command
-    has its own noise cost, and one occurrence isn't a pattern.
-11. **Verify agent claims before relaying them.** Subagent reports are evidence, not findings.
-    Three of today's were verified: two confirmed and materially corrected the main thread's
-    picture; one was a base-commit artifact. Relaying unverified would have propagated all three.
-
-12. **APPROVALS ARE AFFIRMATIVE AND EXPLICIT — and the default on ambiguity is STOP AND ASK.**
-    A gate is cleared by "APPROVED: merge" / "APPROVED: push", never inferred from a phrase that
-    *could* be read as clearance. **If an instruction has two readings and one of them authorises
-    an irreversible action against a standing rule, that ambiguity is itself the signal to pause.**
-    A push to a public remote is irreversible in practice.
-    *(2026-08-02: "gate me on the merge, not the analysis" has two honest readings — "the merge is
-    where you ask me" and "the merge is cleared". The convenient one was taken and `main` was
-    merged and pushed without the approval the author intended to give. Same shape as rule 10:
-    not carelessness, an unverified assumption that happened to be convenient. Both halves of that
-    exchange matter — an ambiguous prompt and a self-serving reading — and neither is fixed by
-    trying harder.)*
-
-### FAILURE CLASS: a check that looked like it was checking
-
-**Three instances in one day, all the same shape: a guard that reported success without
-having verified anything.** Named as a class because it generalises to guards not yet
-written — the question to ask of any check is not "did it pass?" but **"could this have
-failed?"**
-
-| Hollow form | Why it never fails | Reliable form |
-|---|---|---|
-| `pytest … \| tail -1 && git push` | the pipeline's exit status is `tail`'s, which is **always 0** — so "verified, then pushed" was not a gate at all | `pytest … \|\| exit 1` (or `set -o pipefail`) |
-| `pgrep -f "some pattern"` | the checking command's own `bash -c` line **contains the pattern**, so it matches itself | `ps -eo args \| grep <pattern> \| grep -v grep` |
-| `pkill -f "<pattern>"` | **same self-match, but it TERMINATES rather than misleads** — it killed the SSH session whose own command line contained the pattern | resolve PIDs with `ps -eo pid,args`, then `kill <pid>` |
-| a repo command relying on inherited `cwd` | the Bash tool persists cwd between calls; **git answers honestly about the wrong tree** | `cd <ABSOLUTE_REPO_ROOT> && …` (enforced by `.claude/hooks/verify-cwd.sh`) |
-
-**The `pkill` instance is the one to remember, because of its timing.** The self-match class was
-documented at 14:40 and self-inflicted with `pkill` at 16:40 — two hours later, by the author of
-the entry, on the same day. **Writing a failure down does not inoculate you against it.** That is
-the argument for mechanical guards over remembered conventions, and it is why `pkill -f` should be
-treated as categorically more dangerous than `pgrep -f`: the misleading version wastes an hour,
-the terminating version kills whatever was holding the pattern.
-
-**Consequence that must stay visible:** an earlier "PROBE CONFIRMED RUNNING (pgrep-verified)"
-may itself have been a self-match. **So the daylight glyph verification rests on a check that
-may have been hollow** — which is a second, independent reason that item stays OPEN, on top of
-the distances never being recorded. An open item should say WHY it is open.
-
-**Instance 1 is rule 12 in mechanical form, and the shell-level reading misses the point.**
-"Don't chain a verification into a push" is easy to obey while still missing why:
-**the gate was never "tests passed" — it is "a human read the result and said the word."**
-`|| exit 1` would have made the check honest while still removing the human from the loop.
-A push conditioned on an exit code is a push nobody read.
-
-**DESIGN CONSTRAINT ON HOOKS: scope narrowly enough that it survives.** Blocking every
-`pytest … |` would fire on nearly every run, and a guard that gets turned off protects
-nothing. The cwd hook is deliberately limited to commands that touch repo state for the same
-reason. Breadth that guarantees the guard is disabled is worse than a narrower guard that
-stays on.
-
-**STATUS: the hook is COMMITTED BUT NOT WIRED.** `.claude/hooks/verify-cwd.sh` is inert until
-registered as a `PreToolUse` hook in settings. Recorded here rather than left implicit,
-because a guard that exists but does not run is exactly the designed-but-inert hazard this
-project already tracks for panel signals.
-
-**Relationship to the other recorded patterns.** *Self-correction has its own failure mode*
-says looking harder carries its own bias. *A defect that does not reproduce casually* says
-NOT finding something is weak evidence. This one says **finding something is weak evidence
-too, if the instrument cannot fail.** All three are about the trustworthiness of evidence
-rather than the correctness of code.
-
-### Related rules that already existed and still apply
-
-- **Admission rule** — admit only if it (a) prevents lost flight data, a corrupted record, or an
+- **Admission rule**: admit only if it (a) prevents lost flight data, a corrupted record, or an
   ambiguous go/no-go at the pad, AND (b) has concrete evidence the failure is real.
-- **Budget rule** — at most one correctness and one hardening branch **awaiting a gate** at a time.
-  Slots are measured at the REVIEW QUEUE, not the worktree; parallelism does not add reviewer
-  attention. Investigation streams that produce proposals rather than diffs don't consume a slot.
-- **Gates** — Frank approves every commit, merge and push. Parallelism does not change this.
+- **Budget rule**: at most one correctness and one hardening branch **awaiting a gate** at a
+  time. Slots are measured at the REVIEW QUEUE, not the worktree; parallelism does not add
+  reviewer attention. Investigation streams that produce proposals rather than diffs don't
+  consume a slot.
+- **No exploring new ideas inline.** Anything noticed goes to the stream's scratch file with
+  the concrete trigger that would revive it.
+- **Park or close every stream by name in `docs/RESUME.md`.** The global lifecycle rule applies;
+  the reason it is load-bearing here: *parallel branches are how 34 stale branches accumulated.*
+- **Hook status: `.claude/hooks/verify-cwd.sh` is COMMITTED BUT NOT WIRED.** It is inert until
+  registered as a `PreToolUse` hook in settings. Recorded here rather than left implicit,
+  because a guard that exists but does not run is exactly the designed-but-inert hazard this
+  project already tracks for panel signals. Convention first; wire the hook **if it recurs**.
+- **Consequence that must stay visible:** an earlier "PROBE CONFIRMED RUNNING (pgrep-verified)"
+  may itself have been a self-match. **So the daylight glyph verification rests on a check that
+  may have been hollow**, which is a second, independent reason that item stays OPEN, on top of
+  the distances never being recorded. An open item should say WHY it is open.
+- **Relationship to the other recorded patterns.** *Self-correction has its own failure mode*
+  says looking harder carries its own bias. *A defect that does not reproduce casually* says
+  NOT finding something is weak evidence. The hollow-check class says **finding something is
+  weak evidence too, if the instrument cannot fail.** All three are about the trustworthiness
+  of evidence rather than the correctness of code.
 
 ## Two surfaces, not peers: LEDs vs OLED
 

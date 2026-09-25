@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | /Users/renatus/code/lora-rocket-telemetry/.claude/hooks/verify-cwd.sh",
+            "timeout": 10,
+            "statusMessage": "verify-cwd: checking repo command is anchored"
+          }
+        ]
+      }
+    ]
+  }
+}

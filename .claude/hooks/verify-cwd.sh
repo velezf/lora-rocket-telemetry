@@ -18,10 +18,24 @@
 # instance of the failure class it exists to prevent.
 set -euo pipefail
 REPO="/Users/renatus/code/lora-rocket-telemetry"
-cmd="$(cat)"                      # the proposed command, on stdin
+cmd="$(cat)"                      # the proposed command text on stdin (settings.json extracts it
+                                  # from the hook JSON with `jq -r .tool_input.command` first)
 
 # Only police commands that read or mutate repo state.
 grep -Eq '(^|[;&|[:space:]])(git|pyright|pytest)([[:space:]]|$)' <<<"$cmd" || exit 0
+# INSTANCE 1 of the hollow-guard class: verification chained into mutation.
+# `pytest … | tail -1 && git push` pushed on an UNVERIFIED suite, because a pipeline's
+# exit status is the LAST command's — tail always succeeds. But `|| exit 1` is not the
+# fix either: it still lets a push fire on an exit CODE that nobody read.
+# The rule is stronger — a verification and a push/merge must not be the SAME command,
+# so the result is read, and approved, before anything mutates.
+if grep -Eq '(pytest|pyright)' <<<"$cmd" && grep -Eq 'git[[:space:]]+(push|merge)' <<<"$cmd"; then
+  echo "BLOCKED: verification chained into push/merge in one command." >&2
+  echo "Run the check, READ the output, then push as a separate deliberate act." >&2
+  echo "Reason: a chained push fires on an exit status nobody looked at." >&2
+  exit 2
+fi
+
 # Anchored if it cds to the absolute repo root, or otherwise names it. Once anchored a
 # RELATIVE interpreter path like `.venv-test/bin/python` is fine — it resolves against the
 # cwd we just pinned. (An earlier draft of this hook rejected that, which was a FALSE
@@ -35,19 +49,6 @@ grep -Eq '(^|[;&|[:space:]])\.venv-test/' <<<"$cmd" && {
   echo "Use: cd $REPO && .venv-test/bin/python ..." >&2
   exit 2
 }
-
-# INSTANCE 1 of the hollow-guard class: verification chained into mutation.
-# `pytest … | tail -1 && git push` pushed on an UNVERIFIED suite, because a pipeline's
-# exit status is the LAST command's — tail always succeeds. But `|| exit 1` is not the
-# fix either: it still lets a push fire on an exit CODE that nobody read.
-# The rule is stronger — a verification and a push/merge must not be the SAME command,
-# so the result is read, and approved, before anything mutates.
-if grep -Eq '(pytest|pyright)' <<<"$cmd" && grep -Eq 'git[[:space:]]+(push|merge)' <<<"$cmd"; then
-  echo "BLOCKED: verification chained into push/merge in one command." >&2
-  echo "Run the check, READ the output, then push as a separate deliberate act." >&2
-  echo "Reason: a chained push fires on an exit status nobody looked at." >&2
-  exit 2
-fi
 
 echo "BLOCKED: repo command without an absolute anchor (rule 10)." >&2
 echo "Prefix with: cd $REPO && ..." >&2

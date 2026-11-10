@@ -906,9 +906,13 @@ enabled for boot.
   `git pull` works. **The deploy key is read-only and the Pi tracks `origin`, so an unpushed
   branch cannot reach the box by `git pull`** — that is exactly how the 2026-07-31 hand-copy
   drift happened. Deploy unpushed work over SSH from the Mac, never by copying files.
-- **Wi-Fi:** home **WideRoad** (priority 0) first, **iPhone 17 hotspot** fallback
-  (priority −10, infinite retry, persistent NM keyfile). Networking is netplan-rendered
-  → NetworkManager. _(Hotspot secret lives only on the Pi, never in this repo.)_
+- **Network (since 2026-11-10, after the UniFi rebuild):** native NM profile **`Ripples`**
+  (home IoT SSID, WPA2 PPSK, priority 100) first, **iPhone 17 hotspot** fallback (priority
+  50, infinite retry, persistent NM keyfile), the old `netplan-wlan0-WideRoad` profile
+  (SSID gone) at 10. Wired `eth0` on DR7 port 1, IoT VLAN, fixed `10.10.20.35`; `wlan0`
+  `10.10.20.36` (UniFi DHCP reservation set 2026-11-10). `.local` names do not cross VLANs
+  on the new network: use the IP. _(Wi-Fi and hotspot secrets live only on the Pi, never in
+  this repo.)_
 
 ## Deploying to `apogee-gs` — the sanctioned path
 

@@ -83,10 +83,12 @@ leave it alone. (Trixie also dropped `dphys-swapfile`.)
 ## Access & operations (recorded 2026-08-31 — facts live HERE, cite elsewhere)
 
 - **Hostname `apogee-handheld`** (mDNS `apogee-handheld.local`), user
-  **`rocketman`**, key-only SSH. On the home **WideRoad** Wi-Fi (its 2.4 GHz
-  side — the Zero's radio proved it exists by scanning it), NM profile
-  `WideRoad` at autoconnect-priority 100; the original `WideRoadGuest`
-  netplan profile remains as fallback. **Do not develop against the guest
+  **`rocketman`**, key-only SSH. Since 2026-11-10 on the home **Ripples**
+  Wi-Fi (the IoT SSID after the UniFi rebuild; 2.4 GHz, WPA2 PPSK — the key
+  is not in this repo), native NM profile `Ripples` at autoconnect-priority
+  100, address `10.10.20.x` on the IoT VLAN. The old `WideRoad` profile
+  (SSID no longer exists) is kept at priority 50 and the `WideRoadGuest`
+  netplan profile at 0, as fallbacks. **Do not develop against the guest
   network**: its client isolation intermittently blocks ICMP, mDNS, *and*
   TCP between clients (an afternoon was spent learning this).
 - **Service:** `apogee-handheld.service` (systemd, enabled) runs

@@ -135,4 +135,6 @@ is a subtler version of the same failure — it reproduces fine on *your* machin
 
 Work happens on **the Mac** (firmware, heavy lifting) and **the Pi 5 ground station**
 (on-box tinkering via Claude Code). Both sync through `origin/main` — **pull before
-starting** so parallel sessions don't diverge.
+starting** so parallel sessions don't diverge. The Pi is shared: ports in use on it are
+listed once in `~/code/CLAUDE.md` "Shared hardware: the Pis" (ours, 8080, is
+`DASHBOARD_PORT` in `ground/dashboard/app.py`).
